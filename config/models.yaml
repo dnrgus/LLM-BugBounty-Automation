@@ -1,0 +1,7 @@
+models:
+  fake:
+    provider: fake
+    model: fake-llm
+    version: offline
+    temperature: 0
+

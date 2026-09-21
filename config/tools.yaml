@@ -1,0 +1,17 @@
+tools:
+  promptfoo:
+    enabled: true
+    category: llm_redteam
+    output: json
+  garak:
+    enabled: true
+    category: llm_scanner
+    output: jsonl
+  pyrit:
+    enabled: true
+    category: llm_redteam
+  nuclei:
+    enabled: true
+    category: web_scanner
+    output: jsonl
+

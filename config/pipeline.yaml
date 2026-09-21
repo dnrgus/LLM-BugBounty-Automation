@@ -1,0 +1,8 @@
+profiles:
+  quick:
+    testcase_limit: 5
+    judges: [rule, canary, regex]
+  llm:
+    testcase_limit: 25
+    judges: [rule, canary, regex, semantic]
+

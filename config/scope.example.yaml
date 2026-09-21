@@ -1,0 +1,25 @@
+program: example-bugbounty
+scope:
+  domains: [ai.example.com]
+  url_patterns:
+    - https://ai.example.com/api/*
+testing:
+  automated_scanning: true
+  prompt_injection: true
+  system_prompt_leak: true
+  destructive_actions: false
+  denial_of_service: false
+  cross_user_data_access: false
+limits:
+  requests_per_second: 2
+  concurrency: 3
+  max_requests_per_run: 3000
+approval_required:
+  - external_callback
+  - file_write
+blocked_actions:
+  - send_message
+  - account_state_change
+  - payment
+  - delete
+
