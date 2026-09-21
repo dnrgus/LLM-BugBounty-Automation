@@ -1,0 +1,2 @@
+"""LLM scanner adapters."""
+

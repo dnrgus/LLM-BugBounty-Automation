@@ -5,8 +5,11 @@ import asyncio
 import json
 from pathlib import Path
 
+from adapters.llm.garak import GarakAdapter
+from adapters.llm.promptfoo import PromptfooAdapter
 from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import run_sample_pipeline
+from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
@@ -19,24 +22,26 @@ from testcase.selector import select_executable_testcases
 DEFAULT_SCOPE = Path("config/scope.example.yaml")
 DEFAULT_TESTCASES = Path("testcase/suites/basic.yaml")
 DEFAULT_JUDGE_BENCHMARK = Path("benchmarks/judge/baseline.json")
+DEFAULT_TOOLS = Path("config/tools.yaml")
 
 
 def _json(data: object) -> str:
     return json.dumps(data, indent=2, sort_keys=True)
 
 
-def cmd_doctor(_: argparse.Namespace) -> int:
-    from shutil import which
-    import platform
-    import sys
-
-    tools = ["promptfoo", "garak", "pyrit", "nuclei", "dalfox", "trufflehog"]
-    print(f"[OK] Python {sys.version.split()[0]}")
-    print(f"[OK] Platform {platform.platform()}")
-    for tool in tools:
-        status = "OK" if which(tool) else "WARN"
-        detail = which(tool) or "not installed"
-        print(f"[{status}] {tool} {detail}")
+def cmd_doctor(args: argparse.Namespace) -> int:
+    snapshot = check_tools(args.tools)
+    if args.write_lock:
+        write_tool_lock(snapshot, args.lockfile)
+    if args.json:
+        print(_json(snapshot))
+        return 0
+    print(f"[OK] Python {snapshot['python']}")
+    print(f"[OK] Platform {snapshot['platform']}")
+    for tool in snapshot["tools"]:
+        label = "OK" if tool["available"] else "WARN"
+        detail = tool["version"] or tool["path"] or "not installed"
+        print(f"[{label}] {tool['name']} {detail}")
     return 0
 
 
@@ -99,6 +104,21 @@ def cmd_judge_benchmark(args: argparse.Namespace) -> int:
     return 0 if metrics["false_positive"] == 0 and metrics["false_negative"] == 0 else 1
 
 
+def cmd_normalize_tool_output(args: argparse.Namespace) -> int:
+    adapter = _adapter_for_tool(args.tool)
+    results = adapter.parse_file(args.input, run_id=args.run_id, target_id=args.target_id, version=args.version)
+    print(_json([result.to_dict() for result in results]))
+    return 0
+
+
+def _adapter_for_tool(tool: str):
+    if tool == "promptfoo":
+        return PromptfooAdapter()
+    if tool == "garak":
+        return GarakAdapter()
+    raise ValueError(f"unsupported tool: {tool}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llm-bugbounty",
@@ -107,6 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     doctor = sub.add_parser("doctor", help="Check local runtime and optional tools")
+    doctor.add_argument("--tools", type=Path, default=DEFAULT_TOOLS)
+    doctor.add_argument("--json", action="store_true", help="Print machine-readable doctor output")
+    doctor.add_argument("--write-lock", action="store_true", help="Write tool_versions.lock.yaml")
+    doctor.add_argument("--lockfile", type=Path, default=Path("tool_versions.lock.yaml"))
     doctor.set_defaults(func=cmd_doctor)
 
     fingerprint = sub.add_parser("fingerprint", help="Create a reproducibility fingerprint")
@@ -134,6 +158,14 @@ def build_parser() -> argparse.ArgumentParser:
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
     judge_benchmark.add_argument("--benchmark", type=Path, default=DEFAULT_JUDGE_BENCHMARK)
     judge_benchmark.set_defaults(func=cmd_judge_benchmark)
+
+    normalize = sub.add_parser("normalize-tool-output", help="Normalize external LLM tool output")
+    normalize.add_argument("--tool", choices=["promptfoo", "garak"], required=True)
+    normalize.add_argument("--input", type=Path, required=True)
+    normalize.add_argument("--run-id", default="run_fixture")
+    normalize.add_argument("--target-id", default="target_fixture")
+    normalize.add_argument("--version")
+    normalize.set_defaults(func=cmd_normalize_tool_output)
 
     return parser
 

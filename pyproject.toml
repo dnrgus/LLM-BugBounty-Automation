@@ -20,6 +20,8 @@ dev = [
 [tool.setuptools]
 py-modules = ["cli", "main"]
 packages = [
+  "adapters",
+  "adapters.llm",
   "core",
   "scope",
   "targets",

@@ -10,8 +10,31 @@ tools:
   pyrit:
     enabled: true
     category: llm_redteam
+  subfinder:
+    enabled: true
+    category: recon
+    output: jsonl
+  httpx:
+    enabled: true
+    category: recon
+    output: jsonl
+  katana:
+    enabled: true
+    category: discovery
+    output: jsonl
+  ffuf:
+    enabled: true
+    category: discovery
+    output: json
   nuclei:
     enabled: true
     category: web_scanner
     output: jsonl
-
+  dalfox:
+    enabled: true
+    category: web_scanner
+    output: json
+  trufflehog:
+    enabled: true
+    category: secret_scanner
+    output: json
