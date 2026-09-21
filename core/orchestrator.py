@@ -23,6 +23,8 @@ from scope.policy import PolicyEngine
 from storage.artifacts import write_json_artifact
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
+from testcase.coverage import build_coverage_matrix, coverage_summary
+from testcase.selector import select_executable_testcases
 from testcase.schema import Testcase
 
 
@@ -35,7 +37,7 @@ async def run_sample_pipeline(
     target = create_target(target_kind)
     capabilities = await target.capabilities()
     target_metadata = await target.metadata()
-    selected = [case for case in testcases if capabilities.supports(case.requires)]
+    selected = select_executable_testcases(testcases, capabilities, policy)
     fingerprint = build_environment_fingerprint(
         {
             "target_build": target_metadata.kind,
@@ -143,4 +145,7 @@ async def run_sample_pipeline(
         "reports": reports,
         "fingerprint": run.fingerprint,
         "target": target_metadata.id,
+        "coverage": coverage_summary(
+            build_coverage_matrix(testcases, capabilities, {case.id for case in selected})
+        ),
     }

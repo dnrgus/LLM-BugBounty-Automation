@@ -9,7 +9,10 @@ from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import run_sample_pipeline
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
+from targets.factory import create_target
+from testcase.coverage import build_coverage_matrix, coverage_summary
 from testcase.loader import load_testcases
+from testcase.selector import select_executable_testcases
 
 
 DEFAULT_SCOPE = Path("config/scope.example.yaml")
@@ -70,6 +73,22 @@ def cmd_sample_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_coverage(args: argparse.Namespace) -> int:
+    testcases = load_testcases(args.testcases)
+    target = create_target(args.target)
+    capabilities = asyncio.run(target.capabilities())
+    policy = PolicyEngine.from_yaml(args.scope)
+    selected = select_executable_testcases(testcases, capabilities, policy)
+    matrix = build_coverage_matrix(testcases, capabilities, {case.id for case in selected})
+    payload = {
+        "target": args.target,
+        "summary": coverage_summary(matrix),
+        "matrix": [entry.to_dict() for entry in matrix],
+    }
+    print(_json(payload))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llm-bugbounty",
@@ -95,6 +114,12 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
     sample.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
     sample.set_defaults(func=cmd_sample_run)
+
+    coverage = sub.add_parser("coverage", help="Show testcase coverage for a target profile")
+    coverage.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    coverage.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    coverage.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
+    coverage.set_defaults(func=cmd_coverage)
 
     return parser
 
