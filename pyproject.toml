@@ -37,6 +37,7 @@ packages = [
   "live",
   "manifest",
   "packs",
+  "plugins",
   "scenario",
   "findings",
   "recon",

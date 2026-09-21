@@ -1,0 +1,28 @@
+# U12 Browser Plugin SDK -- last resort: a chat UI with no clean API at
+# all, driven by Playwright (an OPTIONAL dependency; only installing it
+# is required for THIS adapter kind, not for the rest of the project):
+#   pip install playwright
+#   playwright install chromium
+#
+# selectors.input/response are required CSS selectors for the chat
+# textbox and the element the assistant's reply renders into.
+# selectors.send is optional; without it, Enter is pressed in the input
+# box instead of clicking a send button.
+#
+# Usage:
+#   python main.py sample-run --target openai --target-config config/targets/browser.example.yaml \
+#     --scope config/my-scope.yaml
+
+target:
+  id: example-browser-target
+  adapter: browser
+  base_url: https://chat.example.com
+  selectors:
+    input: "#chat-input"
+    send: "#send-button"
+    response: "#latest-assistant-message"
+  browser_type: chromium
+  headless: true
+  wait_after_send_ms: 2000
+  capabilities:
+    chat: true

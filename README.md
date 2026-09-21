@@ -51,6 +51,7 @@
 - Scenario Engine (`run-scenario`): 기존 단일 testcase 기반 Executor 경로와 나란히 동작하는 multi-turn/cross-session 공격 워크플로우 실행기. 각 step은 자신만의 `session_ref`를 가질 수 있어 "세션 A에서 정보를 흘리고, 세션 B에서 그걸 다시 물어본다" 같은 cross-session 시나리오를 표현 가능. `{{PREV_RESPONSE}}` / `{{STEP:id}}`로 이전 step의 응답을 다음 step 프롬프트에 템플릿으로 삽입
 - Universal Manifest (`adapter: universal`): 기존 `openai_compatible`/`custom_http` target.yaml 스키마는 그대로 두고, 세 번째 어댑터 종류로 Auth(none/bearer/api_key/basic) × Interaction(chat_completions의 실제 messages 배열 / custom_json 템플릿) × Session(stateful 여부)을 독립적으로 조립하는 `CompatibilityAdapter` 추가. `config/targets/universal.example.yaml` 참고 — 기존 `sample-run`/`scan`/`run-scenario` 등 모든 CLI 명령이 그대로 사용 가능
 - Event 모델 + 범용 WebSocket 전송 (`adapter: websocket`): 스트리밍 대상을 위한 네 번째 어댑터 종류. START/TOKEN/RETRIEVAL/TOOL_CALL/FINAL/ERROR 형식 Event 모델로 임의의 WS 프레임 형식(설정 가능한 `type_field`/`text_field`/`*_types`)을 해석해 하나의 TargetResponse로 합침. `config/targets/websocket.example.yaml` 참고 — Scope/Policy 엔진도 `ws://`/`wss://` 스킴을 인식하도록 함께 확장
+- Plugin SDK + Browser 어댑터 (`adapter: browser`): `targets/config.py`를 건드리지 않고도 새 adapter 종류를 등록할 수 있는 plugin registry(`plugins/registry.py`, 내장 plugin 또는 `llmbb.target_adapters` entry point로 서드파티 plugin도 등록 가능). API가 전혀 없는 채팅 UI를 위한 Playwright 기반 브라우저 자동화 어댑터가 기본 내장 plugin으로 등록되어 있음 — Playwright는 선택 설치(`pip install playwright && playwright install chromium`)이며, 설치 안 된 상태에서도 모듈 로드 자체는 항상 정상 동작하고 실제 사용 시점에만 명확한 에러 발생
 
 ## 빠른 시작
 
@@ -157,6 +158,10 @@ python main.py correlate ./my-service-source https://target.example.com --scope 
 
 # Scenario Engine: multi-turn/cross-session 시나리오 실행 (scenario/suites/*.yaml)
 python main.py run-scenario --scenarios scenario/suites/basic.yaml --target fake-llm
+
+# Browser 어댑터 (API 없는 채팅 UI): 먼저 pip install playwright && playwright install chromium
+python main.py sample-run --target openai --target-config config/targets/browser.example.yaml \
+  --scope config/my-scope.yaml
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark
