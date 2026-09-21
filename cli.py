@@ -28,6 +28,7 @@ from judges.benchmark import load_benchmark_cases, run_benchmark
 from live.auto_profile import auto_profile_candidates
 from live.classify import classify_items
 from live.discovery import discover_target
+from packs.runner import run_selected_packs
 from packs.selector import select_packs
 from recon.pipeline import build_asset_map
 from source.audit import audit_source
@@ -226,18 +227,38 @@ def cmd_discover(args: argparse.Namespace) -> int:
     result = asyncio.run(discover_target(args.url, policy, max_pages=args.max_pages))
     payload = result.to_dict()
 
-    if args.classify or args.auto_profile or args.select_packs:
+    select_packs_requested = args.select_packs or args.run_packs
+    if args.classify or args.auto_profile or select_packs_requested:
         candidates = classify_items(result.items)
         payload["classification"] = [candidate.to_dict() for candidate in candidates]
         if args.auto_profile:
             store = SQLiteStore(args.db)
             profiles = asyncio.run(auto_profile_candidates(candidates, policy, store))
             payload["auto_profile"] = [profile_result.to_dict() for profile_result in profiles]
-        if args.select_packs:
+        if select_packs_requested:
             budget = AttackBudget(max_requests=args.pack_budget_requests) if args.pack_budget_requests else None
             target_kinds = {candidate.kind for candidate in candidates}
             selections = select_packs(target_kinds, policy, budget=budget)
             payload["pack_selection"] = [selection.to_dict() for selection in selections]
+
+            if args.run_packs:
+                testcases = load_testcases(args.testcases)
+                store = SQLiteStore(args.db)
+                external_scan_inputs: dict[str, Path | str] = {}
+                if args.nuclei_results:
+                    external_scan_inputs["nuclei"] = args.nuclei_results
+                if args.dalfox_results:
+                    external_scan_inputs["dalfox"] = args.dalfox_results
+                if args.trufflehog_results:
+                    external_scan_inputs["trufflehog"] = args.trufflehog_results
+                pack_runs = asyncio.run(
+                    run_selected_packs(
+                        selections, testcases, policy, store,
+                        target_kind=args.pack_target, target_config=args.pack_target_config,
+                        external_scan_inputs=external_scan_inputs,
+                    )
+                )
+                payload["pack_runs"] = [pack_run.to_dict() for pack_run in pack_runs]
 
     print(_json(payload))
     return 0
@@ -481,6 +502,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--pack-budget-requests", type=int, default=None,
         help="Optional request budget ceiling used only for --select-packs' budget check",
     )
+    discover.add_argument(
+        "--run-packs", action="store_true",
+        help="U7: actually run selected packs (implies --select-packs) -- testcase_suite packs run against --pack-target; "
+        "external-tool packs (nuclei/dalfox/trufflehog) only run if you supply their results file",
+    )
+    discover.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    discover.add_argument("--pack-target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default=None)
+    discover.add_argument("--pack-target-config", type=Path, default=None)
+    discover.add_argument("--nuclei-results", type=Path, default=None)
+    discover.add_argument("--dalfox-results", type=Path, default=None)
+    discover.add_argument("--trufflehog-results", type=Path, default=None)
     discover.set_defaults(func=cmd_discover)
 
     scan = sub.add_parser(
