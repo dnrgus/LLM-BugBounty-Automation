@@ -25,6 +25,7 @@ from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from recon.pipeline import build_asset_map
+from source.audit import audit_source
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
@@ -211,6 +212,12 @@ def cmd_profile(args: argparse.Namespace) -> int:
             probe=not args.no_probe,
         )
     )
+    print(_json(result))
+    return 0
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    result = audit_source(args.path, max_files=args.max_files)
     print(_json(result))
     return 0
 
@@ -414,6 +421,14 @@ def build_parser() -> argparse.ArgumentParser:
     recon.add_argument("--katana-input", type=Path)
     recon.add_argument("--ffuf-input", type=Path)
     recon.set_defaults(func=cmd_recon)
+
+    audit = sub.add_parser(
+        "audit",
+        help="SOURCE MODE: statically analyze a source tree (routes/inputs/sinks/secrets/LLM integration)",
+    )
+    audit.add_argument("path", type=Path)
+    audit.add_argument("--max-files", type=int, default=2000)
+    audit.set_defaults(func=cmd_audit)
 
     scan = sub.add_parser(
         "scan",

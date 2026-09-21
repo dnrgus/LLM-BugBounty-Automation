@@ -43,6 +43,9 @@ jobs:
       - name: Full orchestrator smoke (recon -> scan -> adaptive -> external_scan -> dedup)
         run: python main.py scan --profile full
 
+      - name: SOURCE mode smoke (static source audit)
+        run: python main.py audit tests/fixtures/source/sample_app
+
       - name: Confirm no secrets or raw evidence are staged
         run: |
           git status --short

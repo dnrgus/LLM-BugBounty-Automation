@@ -34,6 +34,7 @@ packages = [
   "findings",
   "recon",
   "rag_harness",
+  "source",
   "scope",
   "targets",
   "testcase",
