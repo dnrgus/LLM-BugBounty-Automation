@@ -1,0 +1,6 @@
+{
+  "results": [
+    {"url": "https://ai.example.com/api/tools", "status": 200, "length": 512, "words": 40, "input": {"FUZZ": "tools"}},
+    {"url": "https://ai.example.com/api/admin/config", "status": 403, "length": 128, "words": 10, "input": {"FUZZ": "admin/config"}}
+  ]
+}

@@ -30,6 +30,26 @@ def test_subdomain_requires_explicit_policy() -> None:
     assert decision.metadata["hostname"] == "chat.ai.example.com"
 
 
+def test_validate_domain_allows_configured_domain() -> None:
+    engine = PolicyEngine.from_yaml(Path("config/scope.example.yaml"))
+    decision = engine.validate_domain("ai.example.com")
+    assert decision.allowed
+
+
+def test_validate_domain_blocks_denied_domain() -> None:
+    engine = PolicyEngine.from_yaml(Path("config/scope.example.yaml"))
+    decision = engine.validate_domain("admin.ai.example.com")
+    assert not decision.allowed
+    assert "explicitly denied" in decision.reason
+
+
+def test_validate_domain_blocks_unrelated_domain() -> None:
+    engine = PolicyEngine.from_yaml(Path("config/scope.example.yaml"))
+    decision = engine.validate_domain("shadow.example.net")
+    assert not decision.allowed
+    assert "out of scope" in decision.reason
+
+
 def test_redirect_is_revalidated_and_record_only_when_out_of_scope() -> None:
     engine = PolicyEngine.from_yaml(Path("config/scope.example.yaml"))
     decision = engine.validate_redirect(

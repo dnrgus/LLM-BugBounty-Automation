@@ -51,6 +51,32 @@ class CapabilityProfile:
 
 
 @dataclass(frozen=True)
+class Asset:
+    run_id: str
+    target_id: str
+    domain: str
+    source: str
+    in_scope: bool = False
+    id: str = field(default_factory=lambda: new_id("asset"))
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class Endpoint:
+    run_id: str
+    target_id: str
+    url: str
+    method: str
+    source: str
+    status_code: int | None = None
+    classification: str = "unclassified"
+    in_scope: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=lambda: new_id("endpoint"))
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class Run:
     target_id: str
     policy_hash: str

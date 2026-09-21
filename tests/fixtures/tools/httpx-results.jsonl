@@ -1,0 +1,3 @@
+{"url":"https://ai.example.com/api/chat","status_code":200,"webserver":"nginx","host":"ai.example.com","tech":["nginx","openai-proxy"]}
+{"url":"https://ai.example.com/api/admin/health","status_code":200,"webserver":"nginx","host":"ai.example.com"}
+{"url":"https://admin.ai.example.com/api/status","status_code":200,"webserver":"nginx","host":"admin.ai.example.com"}

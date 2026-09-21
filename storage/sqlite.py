@@ -6,6 +6,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from core.models import (
+    Asset,
+    Endpoint,
     Evidence,
     Finding,
     Judgement,
@@ -56,6 +58,28 @@ class SQLiteStore:
                   kind text not null,
                   base_url text not null,
                   capabilities text not null,
+                  metadata text not null,
+                  created_at text not null
+                );
+                create table if not exists assets (
+                  id text primary key,
+                  run_id text not null,
+                  target_id text not null,
+                  domain text not null,
+                  source text not null,
+                  in_scope integer not null,
+                  created_at text not null
+                );
+                create table if not exists endpoints (
+                  id text primary key,
+                  run_id text not null,
+                  target_id text not null,
+                  url text not null,
+                  method text not null,
+                  source text not null,
+                  status_code integer,
+                  classification text not null,
+                  in_scope integer not null,
                   metadata text not null,
                   created_at text not null
                 );
@@ -200,6 +224,30 @@ class SQLiteStore:
             conn.execute(
                 "insert into runs values (:id, :target_id, :policy_hash, :fingerprint, :created_at)",
                 asdict(run),
+            )
+
+    def insert_asset(self, asset: Asset) -> None:
+        data = asdict(asset)
+        data["in_scope"] = int(asset.in_scope)
+        with self.connect() as conn:
+            conn.execute(
+                "insert into assets values (:id, :run_id, :target_id, :domain, :source, :in_scope, :created_at)",
+                data,
+            )
+
+    def insert_endpoint(self, endpoint: Endpoint) -> None:
+        data = asdict(endpoint)
+        data["in_scope"] = int(endpoint.in_scope)
+        data["metadata"] = _json(data["metadata"])
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into endpoints values (
+                  :id, :run_id, :target_id, :url, :method, :source,
+                  :status_code, :classification, :in_scope, :metadata, :created_at
+                )
+                """,
+                data,
             )
 
     def insert_session(self, session: SessionState) -> None:
