@@ -1,0 +1,10 @@
+frameworks:
+  owasp_llm_2026:
+    name: OWASP GenAI LLM Top 10 2026
+    purpose: LLM application risk coverage mapping
+  owasp_agentic_2026:
+    name: OWASP Top 10 for Agentic Applications 2026
+    purpose: Agent tool, goal, memory, and autonomy risk coverage mapping
+  mitre_atlas:
+    name: MITRE ATLAS
+    purpose: AI attack technique tagging

@@ -13,6 +13,8 @@
 - 외부 서비스 없이 테스트 가능한 Fake LLM, Fake Agent, Fake RAG Target
 - Run, Target, Testcase, Prompt, Request, Response, Trace/Event, Judgement, Finding, Evidence, Reproduction, Report 저장 모델
 - SQLite 저장소와 Trace ordering 검증
+- OWASP GenAI, OWASP Agentic, MITRE ATLAS 기반 coverage matrix
+- 테스트케이스 schema validation, capability/policy 기반 selector, prompt rendering
 - deterministic judge, evidence redaction, 기본 Markdown report
 
 ## 빠른 시작
@@ -71,6 +73,9 @@ python main.py sample-run
 
 # 재현성 fingerprint 생성
 python main.py fingerprint
+
+# Target capability 기준 coverage matrix 확인
+python main.py coverage --target fake-rag
 ```
 
 ## 마일스톤
