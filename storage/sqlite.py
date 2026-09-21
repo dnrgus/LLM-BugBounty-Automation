@@ -299,9 +299,13 @@ class SQLiteStore:
             )
 
     def insert_mutation(self, mutation: MutationRecord) -> None:
+        # mutation.id is a hash of (strategy, prompt), not a random id, so the
+        # same mutation legitimately reappears across separate runs against
+        # the same store (e.g. re-scanning a target) -- upsert rather than
+        # crash on the resulting unique-constraint collision.
         with self.connect() as conn:
             conn.execute(
-                "insert into mutations values (:id, :testcase_id, :strategy, :prompt_hash, :parent_mutation_id, :generation)",
+                "insert or replace into mutations values (:id, :testcase_id, :strategy, :prompt_hash, :parent_mutation_id, :generation)",
                 asdict(mutation),
             )
 

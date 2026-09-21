@@ -54,6 +54,20 @@ def test_mutation_records_can_be_stored(tmp_path: Path) -> None:
     assert row["prompt_hash"] == candidate.prompt_hash
 
 
+def test_inserting_the_same_mutation_twice_does_not_crash(tmp_path: Path) -> None:
+    # mutation.id is a content hash, not a random id, so the same mutation
+    # legitimately reappears across separate runs against the same store
+    # (e.g. re-scanning a target twice) -- this must upsert, not raise.
+    store = SQLiteStore(tmp_path / "mutations_repeat.sqlite")
+    store.initialize()
+    candidate = MutationEngine(strategies=["identity"]).mutate(_case())[0]
+    store.insert_mutation(candidate.to_record())
+    store.insert_mutation(candidate.to_record())
+    with store.connect() as conn:
+        count = conn.execute("select count(*) as n from mutations").fetchone()["n"]
+    assert count == 1
+
+
 def test_mutate_cli_outputs_json() -> None:
     result = subprocess.run(
         [

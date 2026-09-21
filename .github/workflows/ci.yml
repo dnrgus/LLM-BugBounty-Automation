@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Lint (bug-catching rules only)
+        run: ruff check .
+
+      - name: Unit + integration tests
+        run: pytest -q
+
+      - name: Doctor smoke
+        run: python main.py doctor
+
+      - name: Judge benchmark gate
+        run: python main.py judge-benchmark
+
+      - name: Sample run smoke (fake targets)
+        run: |
+          python main.py sample-run
+          python main.py sample-run --target fake-agent
+          python main.py sample-run --target fake-rag
+
+      - name: Full orchestrator smoke (recon -> scan -> adaptive -> external_scan -> dedup)
+        run: python main.py scan --profile full
+
+      - name: Confirm no secrets or raw evidence are staged
+        run: |
+          git status --short
+          test -z "$(git status --short -- evidence/raw reports/private 2>/dev/null)"
