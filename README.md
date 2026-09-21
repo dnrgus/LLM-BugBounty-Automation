@@ -39,6 +39,11 @@
 - GitHub Actions CI: push/PR마다 `ruff`(버그성 규칙만) → `pytest` → `doctor`/`judge-benchmark`/`sample-run`×3/`scan --profile full` smoke → raw evidence/private report 미포함 확인까지 자동 실행 (Python 3.11/3.12 매트릭스)
 - Session Strategy: testcase가 `session_strategy: shared_suite|persistent`를 선언하면 같은 run(또는 같은 target)의 동일 category testcase들이 하나의 target-side 세션을 실제로 공유 (멀티턴/상태 누적 테스트용)
 
+**v3.0 Universal Bug Bounty Architecture 마이그레이션 진행 중** (URL-only/Source-only/Hybrid 대상까지 하나의 Core로 처리하는 확장 — 기존 기능은 전부 보존):
+
+- AttackSurface 모델: LIVE(Discovery)와 SOURCE(정적분석) 결과가 서로 의존하지 않고 합류하는 공통 중간표현(`AttackSurfaceItem`). 같은 (method, path) endpoint나 (name, position) parameter는 자동 merge, static+live 동시 관측 시 confidence 상승, 충돌하는 메타데이터는 덮어쓰지 않고 `provenance`에 양쪽 다 보존
+- SOURCE MODE (`audit <path>`): 소스 트리를 정적 분석해 언어/프레임워크 감지, route(Flask/FastAPI/Express/Django) 추출, input source(request.args/json/body 등)·위험 sink(eval/os.system/pickle.loads/SQL 문자열 조합 등)·secret(AWS key/PEM/generic API key, 값 자체는 절대 저장 안 함)·LLM/RAG/Agent SDK 연동 패턴까지 탐지
+
 ## 빠른 시작
 
 ```bash
@@ -121,6 +126,9 @@ python main.py profile --target-config config/targets/my-target.yaml --scope con
 # 저장된 finding을 실제 target에 다시 재현 (프로그램이 패치했는지 확인) + Minimal PoC 생성
 python main.py reproduce finding_XXXXXXXXXXXX --target-config config/targets/my-target.yaml \
   --scope config/my-scope.yaml --minimize
+
+# SOURCE MODE: 소스코드 정적 분석 (route/input/sink/secret/LLM 연동 탐지)
+python main.py audit ./my-service-source
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark
