@@ -1,0 +1,38 @@
+# U10 Universal Manifest: assembles a TargetAdapter from independently
+# configurable Auth / Transport / Interaction / Session pieces, instead of
+# picking between openai_compatible/custom_http's two fixed shapes.
+#
+# auth.type: none | bearer | api_key | basic
+# interaction.type: chat_completions (a real OpenAI-style messages array,
+#   built from session history + the new turn) | custom_json (a templated
+#   body, same {{PROMPT}}/{{SESSION}}/{{HISTORY_JSON}} substitution as
+#   custom_http's request.body_template)
+# session.stateful: whether prior turns are replayed into later requests
+#   (true, the default) or every send() is independent
+#
+# Usage:
+#   export TARGET_API_KEY=...
+#   python main.py sample-run --target openai --target-config config/targets/universal.example.yaml \
+#     --scope config/my-scope.yaml
+
+target:
+  id: example-universal-target
+  adapter: universal
+  base_url: https://lab.example.com
+  auth:
+    type: bearer
+    api_key_env: TARGET_API_KEY
+  interaction:
+    type: custom_json
+    method: POST
+    path: /api/chat
+    request_body_template:
+      message: "{{PROMPT}}"
+      session_id: "{{SESSION}}"
+    response_text_path: reply.text
+  session:
+    stateful: true
+  timeout_seconds: 30
+  capabilities:
+    chat: true
+    sessions: true

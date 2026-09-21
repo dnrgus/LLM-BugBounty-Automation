@@ -33,6 +33,7 @@ packages = [
   "core",
   "hybrid",
   "live",
+  "manifest",
   "packs",
   "scenario",
   "findings",

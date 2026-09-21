@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from manifest.adapter import CompatibilityAdapter
 from targets.config import load_target
 from targets.http_target import CustomHTTPAdapter, OpenAICompatibleTarget
 
@@ -65,6 +66,36 @@ target:
     assert target.config.request_path == "/api/chat"
     assert target.config.response_text_path == "reply.text"
     assert target.config.headers["X-Session-Token"] == "cookie-value"
+
+
+def test_load_target_builds_universal_manifest_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TARGET_API_KEY", "sk-universal")
+    config_path = tmp_path / "universal.yaml"
+    config_path.write_text(
+        """
+target:
+  id: lab-universal
+  adapter: universal
+  base_url: https://lab.example.com
+  auth:
+    type: bearer
+    api_key_env: TEST_TARGET_API_KEY
+  interaction:
+    type: custom_json
+    path: /api/chat
+    request_body_template:
+      message: "{{PROMPT}}"
+    response_text_path: reply.text
+  capabilities:
+    chat: true
+""",
+        encoding="utf-8",
+    )
+    target = load_target(config_path)
+    assert isinstance(target, CompatibilityAdapter)
+    assert target.config.base_url == "https://lab.example.com"
+    assert target.config.interaction.request_path == "/api/chat"
+    assert target._auth_headers["Authorization"] == "Bearer sk-universal"
 
 
 def test_load_target_requires_api_key_env_to_be_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
