@@ -24,6 +24,8 @@ from core.orchestrator import (
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
+from live.auto_profile import auto_profile_candidates
+from live.classify import classify_items
 from live.discovery import discover_target
 from recon.pipeline import build_asset_map
 from source.audit import audit_source
@@ -220,7 +222,17 @@ def cmd_profile(args: argparse.Namespace) -> int:
 def cmd_discover(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
     result = asyncio.run(discover_target(args.url, policy, max_pages=args.max_pages))
-    print(_json(result.to_dict()))
+    payload = result.to_dict()
+
+    if args.classify or args.auto_profile:
+        candidates = classify_items(result.items)
+        payload["classification"] = [candidate.to_dict() for candidate in candidates]
+        if args.auto_profile:
+            store = SQLiteStore(args.db)
+            profiles = asyncio.run(auto_profile_candidates(candidates, policy, store))
+            payload["auto_profile"] = [profile_result.to_dict() for profile_result in profiles]
+
+    print(_json(payload))
     return 0
 
 
@@ -445,6 +457,15 @@ def build_parser() -> argparse.ArgumentParser:
     discover.add_argument("url")
     discover.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     discover.add_argument("--max-pages", type=int, default=5)
+    discover.add_argument(
+        "--classify", action="store_true",
+        help="U5 Auto Profiler: also classify discovered items into web/api/graphql/llm/rag/agent/websocket candidates",
+    )
+    discover.add_argument(
+        "--auto-profile", action="store_true",
+        help="U5 Auto Profiler: classify, then hand llm/api candidates to the Capability Probe for best-effort verification (implies --classify)",
+    )
+    discover.add_argument("--db", type=Path, default=Path("runs/discover.sqlite"))
     discover.set_defaults(func=cmd_discover)
 
     scan = sub.add_parser(
