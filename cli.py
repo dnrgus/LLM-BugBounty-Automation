@@ -24,6 +24,7 @@ from core.orchestrator import (
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
+from live.discovery import discover_target
 from recon.pipeline import build_asset_map
 from source.audit import audit_source
 from scope.policy import PolicyEngine
@@ -213,6 +214,13 @@ def cmd_profile(args: argparse.Namespace) -> int:
         )
     )
     print(_json(result))
+    return 0
+
+
+def cmd_discover(args: argparse.Namespace) -> int:
+    policy = PolicyEngine.from_yaml(args.scope)
+    result = asyncio.run(discover_target(args.url, policy, max_pages=args.max_pages))
+    print(_json(result.to_dict()))
     return 0
 
 
@@ -429,6 +437,15 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("path", type=Path)
     audit.add_argument("--max-files", type=int, default=2000)
     audit.set_defaults(func=cmd_audit)
+
+    discover = sub.add_parser(
+        "discover",
+        help="LIVE MODE: passively crawl a URL (GET/HEAD only, no attack payloads) for candidate attack surface",
+    )
+    discover.add_argument("url")
+    discover.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    discover.add_argument("--max-pages", type=int, default=5)
+    discover.set_defaults(func=cmd_discover)
 
     scan = sub.add_parser(
         "scan",

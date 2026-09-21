@@ -43,6 +43,7 @@
 
 - AttackSurface 모델: LIVE(Discovery)와 SOURCE(정적분석) 결과가 서로 의존하지 않고 합류하는 공통 중간표현(`AttackSurfaceItem`). 같은 (method, path) endpoint나 (name, position) parameter는 자동 merge, static+live 동시 관측 시 confidence 상승, 충돌하는 메타데이터는 덮어쓰지 않고 `provenance`에 양쪽 다 보존
 - SOURCE MODE (`audit <path>`): 소스 트리를 정적 분석해 언어/프레임워크 감지, route(Flask/FastAPI/Express/Django) 추출, input source(request.args/json/body 등)·위험 sink(eval/os.system/pickle.loads/SQL 문자열 조합 등)·secret(AWS key/PEM/generic API key, 값 자체는 절대 저장 안 함)·LLM/RAG/Agent SDK 연동 패턴까지 탐지
+- LIVE MODE (`discover <url>`): URL만 갖고 있는 대상을 안전하게 passive crawl — GET/HEAD만 사용하고 공격 payload는 절대 전송하지 않음. 페이지 fingerprint(status/title/서버 헤더), form/인증 힌트(password form, set-cookie, www-authenticate), JS에서 추출한 API path·WebSocket URL·노출된 source map, AI/LLM 관련 키워드 힌트를 `AttackSurfaceItem`으로 수집. 발견된 링크/스크립트도 전부 다시 Scope/Policy 검증을 통과해야 fetch됨 (동일 출처 여부가 아니라 Scope 설정이 유일한 기준)
 
 ## 빠른 시작
 
@@ -129,6 +130,9 @@ python main.py reproduce finding_XXXXXXXXXXXX --target-config config/targets/my-
 
 # SOURCE MODE: 소스코드 정적 분석 (route/input/sink/secret/LLM 연동 탐지)
 python main.py audit ./my-service-source
+
+# LIVE MODE: URL만으로 passive discovery (GET/HEAD만 사용, 공격 payload 없음)
+python main.py discover https://target.example.com --scope config/my-scope.yaml --max-pages 20
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark
