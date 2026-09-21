@@ -16,7 +16,7 @@
 - OWASP GenAI, OWASP Agentic, MITRE ATLAS 기반 coverage matrix
 - 테스트케이스 schema validation, capability/policy 기반 selector, prompt rendering
 - Executor session/checkpoint, timeout, retry, idempotency key, trace export
-- deterministic judge, evidence redaction, 기본 Markdown report
+- deterministic judge, judge benchmark, evidence redaction, 기본 Markdown report
 
 ## 빠른 시작
 
@@ -77,6 +77,9 @@ python main.py fingerprint
 
 # Target capability 기준 coverage matrix 확인
 python main.py coverage --target fake-rag
+
+# Judge baseline benchmark 실행
+python main.py judge-benchmark
 ```
 
 ## 마일스톤

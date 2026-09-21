@@ -7,6 +7,7 @@ from pathlib import Path
 
 from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import run_sample_pipeline
+from judges.benchmark import load_benchmark_cases, run_benchmark
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
@@ -17,6 +18,7 @@ from testcase.selector import select_executable_testcases
 
 DEFAULT_SCOPE = Path("config/scope.example.yaml")
 DEFAULT_TESTCASES = Path("testcase/suites/basic.yaml")
+DEFAULT_JUDGE_BENCHMARK = Path("benchmarks/judge/baseline.json")
 
 
 def _json(data: object) -> str:
@@ -89,6 +91,14 @@ def cmd_coverage(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_judge_benchmark(args: argparse.Namespace) -> int:
+    cases = load_benchmark_cases(args.benchmark)
+    result = run_benchmark(cases)
+    print(_json(result))
+    metrics = result["metrics"]
+    return 0 if metrics["false_positive"] == 0 and metrics["false_negative"] == 0 else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="llm-bugbounty",
@@ -120,6 +130,10 @@ def build_parser() -> argparse.ArgumentParser:
     coverage.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     coverage.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
     coverage.set_defaults(func=cmd_coverage)
+
+    judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
+    judge_benchmark.add_argument("--benchmark", type=Path, default=DEFAULT_JUDGE_BENCHMARK)
+    judge_benchmark.set_defaults(func=cmd_judge_benchmark)
 
     return parser
 
