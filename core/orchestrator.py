@@ -13,6 +13,7 @@ from adapters.scanner.nuclei import NucleiAdapter
 from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
+from core.budget import AttackBudget
 from core.fingerprint import build_environment_fingerprint
 from core.models import (
     Finding,
@@ -38,10 +39,13 @@ from reproduction.reproducer import Reproducer
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.base import TargetMetadata
+from targets.errors import TargetError
 from targets.factory import create_target
 from testcase.coverage import build_coverage_matrix, coverage_summary
 from testcase.selector import select_executable_testcases
 from testcase.schema import Testcase
+
+_MAX_CONSECUTIVE_TARGET_ERRORS = 3
 
 
 async def run_sample_pipeline(
@@ -109,29 +113,51 @@ async def run_sample_pipeline(
     reports: list[str] = []
     reproduction_summary = {"confirmed": 0, "unstable": 0, "rejected": 0}
     mutation_allowed = profile is None or profile.mutation_enabled
+    budget = AttackBudget(
+        max_requests=profile.budget_max_requests if profile is not None else None,
+        max_tokens=profile.budget_max_tokens if profile is not None else None,
+        max_cost_usd=profile.budget_max_cost_usd if profile is not None else None,
+        max_runtime_minutes=profile.budget_max_runtime_minutes if profile is not None else None,
+        per_suite_requests=profile.budget_per_suite if profile is not None else None,
+    )
+    consecutive_target_errors = 0
+    executed_testcases: list[str] = []
 
     for case in selected:
+        decision = budget.check(category=case.category)
+        if not decision.allowed:
+            break
         if case.mutation.get("enabled", False) and mutation_allowed:
             for mutation in mutation_engine.mutate(case):
                 store.insert_mutation(mutation.to_record())
-        await _process_case(
-            run=run,
-            case=case,
-            executor=executor,
-            judges=judges,
-            reproducer=reproducer,
-            store=store,
-            target_metadata=target_metadata,
-            findings=findings,
-            reports=reports,
-            reproduction_summary=reproduction_summary,
-        )
+        try:
+            await _process_case(
+                run=run,
+                case=case,
+                executor=executor,
+                judges=judges,
+                reproducer=reproducer,
+                store=store,
+                target_metadata=target_metadata,
+                findings=findings,
+                reports=reports,
+                reproduction_summary=reproduction_summary,
+                budget=budget,
+            )
+            executed_testcases.append(case.id)
+            consecutive_target_errors = 0
+        except TargetError:
+            consecutive_target_errors += 1
+            if consecutive_target_errors >= _MAX_CONSECUTIVE_TARGET_ERRORS:
+                budget.stop_reason = "repeated_target_errors"
+                break
 
     clusters = _cluster_and_report(run, findings, reports)
 
     return {
         "run_id": run.id,
         "selected_testcases": [case.id for case in selected],
+        "executed_testcases": executed_testcases,
         "finding_count": len(findings),
         "reports": reports,
         "fingerprint": run.fingerprint,
@@ -141,6 +167,7 @@ async def run_sample_pipeline(
         ),
         "reproductions": reproduction_summary,
         "clusters": clusters,
+        "budget": budget.usage,
     }
 
 
@@ -165,6 +192,7 @@ async def _process_case(
     reports: list[str],
     reproduction_summary: dict[str, int],
     mutation_id: str | None = None,
+    budget: AttackBudget | None = None,
 ) -> Finding | None:
     store.insert_testcase(
         StoredTestcase(
@@ -205,6 +233,10 @@ async def _process_case(
     )
     judgement = judges.judge(run.id, case, response.text)
     store.insert_judgement(judgement)
+    if budget is not None:
+        usage = response.metadata.get("usage") if isinstance(response.metadata, dict) else None
+        tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
+        budget.commit_usage(category=case.category, tokens=int(tokens or len(response.text.split())))
     evidence_bundle = write_evidence_bundle(
         Path("evidence/raw"),
         Path("evidence/sanitized"),
@@ -318,6 +350,7 @@ async def run_adaptive_pipeline(
     reports: list[str] = []
     reproduction_summary = {"confirmed": 0, "unstable": 0, "rejected": 0}
     plans: list[dict[str, object]] = []
+    consecutive_target_errors = 0
 
     for result in pyrit_results:
         base_case = testcase_by_id.get(result.testcase_id) if result.testcase_id else None
@@ -330,19 +363,27 @@ async def run_adaptive_pipeline(
         for mutation in plan.mutations:
             store.insert_mutation(mutation.to_record())
             mutated_case = replace(base_case, id=f"{base_case.id}::{mutation.id}", prompt=mutation.prompt)
-            await _process_case(
-                run=run,
-                case=mutated_case,
-                executor=executor,
-                judges=judges,
-                reproducer=reproducer,
-                store=store,
-                target_metadata=target_metadata,
-                findings=findings,
-                reports=reports,
-                reproduction_summary=reproduction_summary,
-                mutation_id=mutation.id,
-            )
+            try:
+                await _process_case(
+                    run=run,
+                    case=mutated_case,
+                    executor=executor,
+                    judges=judges,
+                    reproducer=reproducer,
+                    store=store,
+                    target_metadata=target_metadata,
+                    findings=findings,
+                    reports=reports,
+                    reproduction_summary=reproduction_summary,
+                    mutation_id=mutation.id,
+                )
+                consecutive_target_errors = 0
+            except TargetError:
+                consecutive_target_errors += 1
+                if consecutive_target_errors >= _MAX_CONSECUTIVE_TARGET_ERRORS:
+                    break
+        if consecutive_target_errors >= _MAX_CONSECUTIVE_TARGET_ERRORS:
+            break
 
     clusters = _cluster_and_report(run, findings, reports)
 

@@ -22,6 +22,45 @@ def _testcases():
     return load_testcases("testcase/suites/basic.yaml")
 
 
+def test_profile_budget_zero_requests_stops_before_any_testcase_runs(tmp_path: Path) -> None:
+    profile = replace(load_profile("quick", "config/pipeline.yaml"), budget_max_requests=0)
+    store = SQLiteStore(tmp_path / "budget.sqlite")
+    result = asyncio.run(run_sample_pipeline(_policy(), _testcases(), store, target_kind="fake-llm", profile=profile))
+    assert len(result["selected_testcases"]) > 0
+    assert result["executed_testcases"] == []
+    assert result["budget"]["stop_reason"] == "budget_exhausted:requests"
+
+
+def test_profile_budget_commits_usage_after_executing_a_testcase(tmp_path: Path) -> None:
+    profile = replace(load_profile("quick", "config/pipeline.yaml"), budget_max_requests=1, testcase_limit=1)
+    store = SQLiteStore(tmp_path / "budget_commit.sqlite")
+    result = asyncio.run(run_sample_pipeline(_policy(), _testcases(), store, target_kind="fake-llm", profile=profile))
+    assert result["executed_testcases"] == ["LLM-PI-001"]
+    assert result["budget"]["requests_used"] == 1
+
+
+async def _run_sample_pipeline_with_failing_target(monkeypatch, store, profile=None):
+    import core.orchestrator as orchestrator_module
+    from targets.errors import TargetConnectionError
+    from targets.fake import FakeLLMTarget
+
+    class AlwaysFailingTarget(FakeLLMTarget):
+        async def send(self, prompt, session=None):
+            raise TargetConnectionError("simulated outage")
+
+    monkeypatch.setattr(orchestrator_module, "create_target", lambda kind, config=None: AlwaysFailingTarget())
+    return await run_sample_pipeline(_policy(), _testcases(), store, target_kind="fake-llm", profile=profile)
+
+
+def test_repeated_target_errors_stop_the_run_gracefully_instead_of_crashing(tmp_path, monkeypatch) -> None:
+    store = SQLiteStore(tmp_path / "failing.sqlite")
+    result = asyncio.run(_run_sample_pipeline_with_failing_target(monkeypatch, store))
+    # 2 testcases are selected against fake-llm (chat-only, no rag/tools); every
+    # send() raises, so the loop must stop gracefully rather than propagate.
+    assert result["finding_count"] == 0
+    assert len(result["executed_testcases"]) == 0
+
+
 def test_profile_testcase_limit_slices_selected_testcases(tmp_path: Path) -> None:
     profile = replace(load_profile("quick", "config/pipeline.yaml"), testcase_limit=1)
     store = SQLiteStore(tmp_path / "quick.sqlite")

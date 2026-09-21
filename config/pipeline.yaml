@@ -12,6 +12,10 @@ profiles:
     mutation:
       enabled: false
       strategies: [identity]
+    budget:
+      requests: 20
+      tokens: 50000
+      max_runtime_minutes: 5
     targets: [fake-llm]
     stages: [scan]
   llm:
@@ -27,6 +31,10 @@ profiles:
     mutation:
       enabled: true
       strategies: [identity, markdown_wrap, json_wrap, roleplay, multi_turn_split]
+    budget:
+      requests: 200
+      tokens: 300000
+      max_runtime_minutes: 20
     targets: [fake-llm]
     stages: [scan]
   agent:
@@ -42,6 +50,10 @@ profiles:
     mutation:
       enabled: true
       strategies: [identity, roleplay, multi_turn_split]
+    budget:
+      requests: 150
+      tokens: 200000
+      max_runtime_minutes: 15
     targets: [fake-agent]
     stages: [scan]
   rag:
@@ -57,6 +69,10 @@ profiles:
     mutation:
       enabled: false
       strategies: [identity]
+    budget:
+      requests: 150
+      tokens: 200000
+      max_runtime_minutes: 15
     targets: [fake-rag]
     stages: [scan]
   web:
@@ -72,6 +88,9 @@ profiles:
     mutation:
       enabled: false
       strategies: [identity]
+    budget:
+      requests: 50
+      max_runtime_minutes: 10
     targets: []
     stages: [recon, external_scan]
   full:
@@ -87,5 +106,14 @@ profiles:
     mutation:
       enabled: true
       strategies: [identity, markdown_wrap, json_wrap, roleplay, multi_turn_split]
+    budget:
+      requests: 500
+      tokens: 500000
+      estimated_cost_usd: 10
+      max_runtime_minutes: 60
+      per_suite:
+        prompt_injection: 100
+        rag: 100
+        agent: 50
     targets: [fake-llm, fake-agent, fake-rag]
     stages: [recon, scan, adaptive, external_scan]

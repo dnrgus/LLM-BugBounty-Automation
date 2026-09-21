@@ -20,6 +20,11 @@ class PipelineProfile:
     mutation_strategies: list[str]
     targets: list[str] = field(default_factory=list)
     stages: list[str] = field(default_factory=lambda: ["scan"])
+    budget_max_requests: int | None = None
+    budget_max_tokens: int | None = None
+    budget_max_cost_usd: float | None = None
+    budget_max_runtime_minutes: float | None = None
+    budget_per_suite: dict[str, int] = field(default_factory=dict)
 
 
 def load_profile(name: str, path: Path | str = "config/pipeline.yaml") -> PipelineProfile:
@@ -32,6 +37,7 @@ def load_profile(name: str, path: Path | str = "config/pipeline.yaml") -> Pipeli
     executor_raw = raw.get("executor", {})
     reproduction_raw = raw.get("reproduction", {})
     mutation_raw = raw.get("mutation", {})
+    budget_raw = raw.get("budget", {})
     attempts = int(reproduction_raw.get("attempts", 1) or 1)
     return PipelineProfile(
         name=name,
@@ -48,4 +54,9 @@ def load_profile(name: str, path: Path | str = "config/pipeline.yaml") -> Pipeli
         mutation_strategies=list(mutation_raw.get("strategies", ["identity"])),
         targets=list(raw.get("targets", [])),
         stages=list(raw.get("stages", ["scan"])),
+        budget_max_requests=budget_raw.get("requests"),
+        budget_max_tokens=budget_raw.get("tokens"),
+        budget_max_cost_usd=budget_raw.get("estimated_cost_usd"),
+        budget_max_runtime_minutes=budget_raw.get("max_runtime_minutes"),
+        budget_per_suite=dict(budget_raw.get("per_suite", {})),
     )
