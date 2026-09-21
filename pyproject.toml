@@ -31,6 +31,7 @@ packages = [
   "attack_surface",
   "attacks",
   "core",
+  "live",
   "findings",
   "recon",
   "rag_harness",
