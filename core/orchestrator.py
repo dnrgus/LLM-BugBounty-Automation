@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 
 from core.fingerprint import build_environment_fingerprint
@@ -21,7 +22,7 @@ from reporting.sanitizer import sanitize_artifact
 from scope.policy import PolicyEngine
 from storage.artifacts import write_json_artifact
 from storage.sqlite import SQLiteStore
-from targets.fake import FakeLLMTarget
+from targets.factory import create_target
 from testcase.schema import Testcase
 
 
@@ -29,16 +30,18 @@ async def run_sample_pipeline(
     policy: PolicyEngine,
     testcases: list[Testcase],
     store: SQLiteStore,
+    target_kind: str = "fake-llm",
 ) -> dict[str, object]:
-    target = FakeLLMTarget()
+    target = create_target(target_kind)
     capabilities = await target.capabilities()
+    target_metadata = await target.metadata()
     selected = [case for case in testcases if capabilities.supports(case.requires)]
     fingerprint = build_environment_fingerprint(
         {
-            "target_build": "fake",
-            "model_provider": "fake",
-            "model_name": "fake-llm",
-            "model_version": "offline",
+            "target_build": target_metadata.kind,
+            "model_provider": target_metadata.provider,
+            "model_name": target_metadata.name,
+            "model_version": target_metadata.version,
             "temperature": 0,
             "seed": 0,
             "system_prompt_hash": "none",
@@ -49,18 +52,18 @@ async def run_sample_pipeline(
         }
     )
     run = Run(
-        target_id="fake-llm",
+        target_id=target_metadata.id,
         policy_hash=policy.policy_hash,
         fingerprint=fingerprint["fingerprint"],
     )
     store.initialize()
     store.insert_target(
         Target(
-            id="fake-llm",
-            kind="llm",
-            base_url="https://ai.example.com/api/chat",
+            id=target_metadata.id,
+            kind=target_metadata.kind,
+            base_url=target_metadata.base_url,
             capabilities=capabilities.to_dict(),
-            metadata=await target.metadata(),
+            metadata=asdict(target_metadata),
         )
     )
     store.insert_run(run)
@@ -89,14 +92,14 @@ async def run_sample_pipeline(
             trace_id=trace.id,
             testcase_id=case.id,
             prompt_hash=case.content_hash,
-            metadata={"target_id": "fake-llm"},
+            metadata={"target_id": target_metadata.id},
         )
         store.insert_request(request)
         response = await executor.execute(
             run=run,
             trace=trace,
             testcase=case,
-            url="https://ai.example.com/api/chat",
+            url=target_metadata.base_url,
         )
         store.insert_response(
             ResponseRecord(
@@ -139,4 +142,5 @@ async def run_sample_pipeline(
         "finding_count": len(findings),
         "reports": reports,
         "fingerprint": run.fingerprint,
+        "target": target_metadata.id,
     }

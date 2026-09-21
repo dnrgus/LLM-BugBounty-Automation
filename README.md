@@ -10,7 +10,7 @@
 - Scope + Program Policy 실행 게이트
 - deny 우선 URL/domain 정책, subdomain 명시 허용, redirect 재검증, request budget enforcement
 - Capability 기반 YAML 테스트케이스 로딩
-- 외부 서비스 없이 테스트 가능한 Fake LLM Target
+- 외부 서비스 없이 테스트 가능한 Fake LLM, Fake Agent, Fake RAG Target
 - Run, Target, Testcase, Prompt, Request, Response, Trace/Event, Judgement, Finding, Evidence, Reproduction, Report 저장 모델
 - SQLite 저장소와 Trace ordering 검증
 - deterministic judge, evidence redaction, 기본 Markdown report
@@ -22,6 +22,9 @@ python -m pip install -e ".[dev]"
 python main.py doctor
 python main.py validate-scope --url https://ai.example.com/api/chat
 python main.py sample-run
+
+# Fake Agent Target으로 샘플 실행
+python main.py sample-run --target fake-agent
 pytest
 ```
 
@@ -82,3 +85,14 @@ python main.py fingerprint
 ## 개발 흐름
 
 각 Phase는 테스트가 통과하고 샘플 실행이 가능한 상태에서 커밋합니다. 실행 가능한 마일스톤에만 tag를 생성합니다.
+
+권장 브랜치 흐름:
+
+```bash
+git switch -c feat/target-adapters
+pytest
+git commit -m "feat: add target adapters and fake targets"
+git push -u origin feat/target-adapters
+```
+
+Phase 작업은 `feat/*` 브랜치에서 진행하고, 검증 후 `main`에 병합합니다.

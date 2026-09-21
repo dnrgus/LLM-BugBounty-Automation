@@ -66,10 +66,20 @@ class Executor:
             )
         )
         response = await self.target.send(testcase.prompt, session=trace.id)
+        for offset, target_event in enumerate(response.trace_events, start=6):
+            self.store.insert_event(
+                TraceEvent(
+                    trace_id=trace.id,
+                    sequence=offset,
+                    event_type=f"target_{target_event.event_type}",
+                    artifact_ref=target_event.artifact_ref,
+                    metadata=target_event.metadata,
+                )
+            )
         self.store.insert_event(
             TraceEvent(
                 trace_id=trace.id,
-                sequence=6,
+                sequence=6 + len(response.trace_events),
                 event_type="final_response",
                 metadata={"length": len(response.text)},
             )
