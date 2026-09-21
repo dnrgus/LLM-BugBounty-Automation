@@ -8,6 +8,7 @@
 
 - `doctor`, `fingerprint`, `validate-scope`, `sample-run` CLI
 - Scope + Program Policy 실행 게이트
+- deny 우선 URL/domain 정책, subdomain 명시 허용, redirect 재검증, request budget enforcement
 - Capability 기반 YAML 테스트케이스 로딩
 - 외부 서비스 없이 테스트 가능한 Fake LLM Target
 - Run, Target, Testcase, Prompt, Request, Response, Trace/Event, Judgement, Finding, Evidence, Reproduction, Report 저장 모델
@@ -48,6 +49,8 @@ tests/         단위 및 통합 테스트
 
 1. Scope validation: domain과 URL pattern 검사
 2. Program Policy validation: 허용된 테스트 유형, request budget, concurrency, 고위험 action 정책 검사
+
+Scope 정책은 deny 규칙을 allow 규칙보다 먼저 적용합니다. Subdomain은 `allow_subdomains: true`가 명시된 경우에만 허용됩니다. Redirect target은 다시 Scope 검사를 거치며, 범위 밖이면 실행하지 않고 record-only decision으로 남깁니다.
 
 고위험 action은 기본적으로 block 또는 simulate 처리합니다. Raw evidence, 로컬 실행 산출물, private report, credential, `.env` 파일은 커밋되지 않도록 `.gitignore`에 포함되어 있습니다.
 

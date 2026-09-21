@@ -1,12 +1,21 @@
 program: example-bugbounty
 scope:
   domains: [ai.example.com]
+  allow_subdomains: false
+  deny_domains: [admin.ai.example.com]
   url_patterns:
     - https://ai.example.com/api/*
+  deny_url_patterns:
+    - https://ai.example.com/api/admin/*
+    - https://ai.example.com/api/delete/*
 testing:
   automated_scanning: true
   prompt_injection: true
   system_prompt_leak: true
+  indirect_injection: true
+  rag_security: true
+  tool_abuse: false
+  agent_security: false
   destructive_actions: false
   denial_of_service: false
   cross_user_data_access: false
@@ -22,4 +31,3 @@ blocked_actions:
   - account_state_change
   - payment
   - delete
-
