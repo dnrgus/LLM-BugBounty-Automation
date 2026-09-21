@@ -37,6 +37,7 @@
 - `reproduce <finding-id>`: 저장된 finding을 실제 target에 다시 재현(프로그램이 패치했는지 확인하는 용도). `--minimize`로 성공한 prompt를 segment 단위로 제거하며 재현이 유지되는 최소 형태까지 축소하는 Minimal PoC 생성, 결과를 evidence로 저장
 - Adapter Contract Test: 5종 Target Adapter(Fake LLM/Agent/RAG, OpenAI-compatible, CustomHTTP) 전체가 metadata/capabilities/healthcheck/send/trace/reset_session 계약을 동일하게 만족하는지 하나의 테스트 스위트로 검증
 - GitHub Actions CI: push/PR마다 `ruff`(버그성 규칙만) → `pytest` → `doctor`/`judge-benchmark`/`sample-run`×3/`scan --profile full` smoke → raw evidence/private report 미포함 확인까지 자동 실행 (Python 3.11/3.12 매트릭스)
+- Session Strategy: testcase가 `session_strategy: shared_suite|persistent`를 선언하면 같은 run(또는 같은 target)의 동일 category testcase들이 하나의 target-side 세션을 실제로 공유 (멀티턴/상태 누적 테스트용)
 
 ## 빠른 시작
 
@@ -215,12 +216,15 @@ git status --short
 
 ### 알려진 제한사항 (Known Limitations)
 
-- 실제 Target Adapter는 OpenAI 호환 API(`--target openai`)와 자체 REST 스키마(`--target-config`, `CustomHTTPAdapter`)까지만 있음. 브라우저 자동화가 필요한 웹 챗봇 UI, WebSocket 기반 API, MCP/Tool 호출을 하는 Agent용 Adapter는 아직 없음 (`targets/base.py`의 계약을 구현하면 추가 가능 — `targets/http_target.py`가 참고 예시)
-- Capability는 target config에 수동으로 선언해야 함 (`capabilities: {chat: true, ...}`). 실제로 대상에 probe를 보내 자동 감지하는 Capability Probe는 아직 없음
+- 실제 Target Adapter는 OpenAI 호환 API(`--target openai`)와 자체 REST 스키마(`--target-config`, `CustomHTTPAdapter`)까지만 있음. **브라우저 자동화가 필요한 웹 챗봇 UI, WebSocket 기반 API, MCP/Tool 호출을 하는 Agent용 Adapter는 의도적으로 만들지 않음** — 실전형 v2.0 설계서 자체가 "브라우저 자동화에 의존한 모든 UI 조작"을 v1 비목표로 명시했고, WebSocket/Agent-MCP는 실제 대상의 구체적인 프로토콜/스키마 없이 범용으로 만들면 검증 안 된 채 깨지기 쉬워서 실제 타겟이 정해지면 그때 `targets/base.py` 계약(`targets/http_target.py`가 참고 예시)으로 추가하는 게 안전함
+- 스트리밍 응답(SSE/chunked) 미지원 — Executor는 완전한 응답 한 번을 기다렸다가 Judge에 넘기는 동기 모델이라, 스트리밍을 지원하려면 Trace/Judge 파이프라인 전체에 걸친 구조 변경이 필요함
+- Capability는 target config에 선언(`capabilities: {chat: true, ...}`)하는 게 기본이며, `profile` 명령이 실제 probe 요청으로 선언과 실제 동작(현재는 multi-turn 기억 여부)의 불일치를 검증. rag/tools/mcp 같은 항목은 한 번의 probe로 안전하게 자동 판별하기 어려워 여전히 선언 기반
+- Session Strategy: testcase에 `session_strategy: per_testcase|shared_suite|persistent`를 선언 가능. `shared_suite`는 같은 run 안에서 같은 category의 testcase들이 세션을 공유(멀티턴/상태 누적 테스트용), `persistent`는 run이 달라져도 같은 target+category면 세션을 재사용. `cross_session_pair`(A/B 세션 비교)는 우리 실행 모델(testcase 1개 = 실행 1번)에 잘 안 맞아 미구현
 - Promptfoo/Garak/PyRIT/Nuclei/Dalfox/TruffleHog는 실제 CLI를 직접 실행하지 않고, 각 도구가 생성한 JSON/JSONL 출력 파일을 정규화하는 방식만 지원 (Adapter-first 설계 원칙에 따름)
 - RAG retrieval은 실제 embedding/vector store가 아니라 오프라인 재현성을 위한 결정론적 Jaccard 토큰 overlap으로 근사됨
 - Root Cause Clustering은 단일 패스 greedy 그룹핑이며 pgvector 기반 semantic clustering은 v2 계획 (설계서 22절)
 - Judge는 rule/regex/canary만 구현되어 있고, `llm`/`full` 프로필 설정에 남아있는 `semantic` judge 항목은 아직 미구현 (해당 이름을 사용하는 judge 요청은 조용히 no-op 처리됨)
+- Attack Budget의 cost_usd는 provider별 가격표가 없어 실제 비용 데이터가 주어질 때만 집계되고, 기본적으로는 항상 0으로 유지되어 `estimated_cost_usd` 상한이 사실상 강제되지 않음
 
 ## 마일스톤
 

@@ -5,6 +5,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+SESSION_STRATEGIES = {"per_testcase", "shared_suite", "persistent"}
+
 
 @dataclass(frozen=True)
 class Testcase:
@@ -18,6 +20,7 @@ class Testcase:
     reproduce: dict[str, Any] = field(default_factory=dict)
     severity: dict[str, str] = field(default_factory=lambda: {"base": "medium"})
     mutation: dict[str, Any] = field(default_factory=dict)
+    session_strategy: str = "per_testcase"
 
     def validate(self) -> None:
         required_fields = {
@@ -36,6 +39,11 @@ class Testcase:
         for framework, tags in self.frameworks.items():
             if not isinstance(tags, list) or not tags:
                 raise ValueError(f"{self.id} framework {framework} must contain at least one tag")
+        if self.session_strategy not in SESSION_STRATEGIES:
+            raise ValueError(
+                f"{self.id} has unknown session_strategy '{self.session_strategy}'; "
+                f"expected one of {sorted(SESSION_STRATEGIES)}"
+            )
 
     def render_prompt(self, variables: dict[str, str] | None = None) -> str:
         rendered = self.prompt
