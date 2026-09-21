@@ -1,0 +1,7 @@
+# Bug-catching rules only (unused imports/names, undefined names, syntax
+# errors) -- not a style linter. Keeps CI meaningful without requiring a
+# separate pass to reformat the whole codebase to satisfy style rules.
+target-version = "py311"
+
+[lint]
+select = ["E9", "F"]

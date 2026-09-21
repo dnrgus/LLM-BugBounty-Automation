@@ -1,5 +1,7 @@
 # LLM-BugBounty-Automation
 
+[![CI](https://github.com/dnrgus/LLM-BugBounty-Automation/actions/workflows/ci.yml/badge.svg)](https://github.com/dnrgus/LLM-BugBounty-Automation/actions/workflows/ci.yml)
+
 허가된 LLM, RAG, AI Agent, 웹 기반 AI 서비스를 반복 가능하고 증거 중심으로 점검하기 위한 보안 테스트 자동화 프로젝트입니다.
 
 이 저장소의 기본 원칙은 **Scope first**, **Policy aware**, **Evidence driven**, **Reproducible**입니다. 허가되지 않은 대상이나 프로그램 정책에서 금지한 행위는 실행 전에 차단하는 것을 목표로 합니다.
@@ -34,6 +36,7 @@
 - Capability Probe: `profile` 명령이 target config에 선언된 capability를 실제 probe 요청(Scope/Policy 게이트와 Executor를 그대로 통과)으로 검증 — 예: `sessions: true`라고 선언했지만 실제로는 turn 간 상태를 기억 못 하는 target을 잡아냄. Executor에 session override(`session_id`)를 추가해 서로 다른 Trace가 같은 target-side 세션을 공유하도록 지원
 - `reproduce <finding-id>`: 저장된 finding을 실제 target에 다시 재현(프로그램이 패치했는지 확인하는 용도). `--minimize`로 성공한 prompt를 segment 단위로 제거하며 재현이 유지되는 최소 형태까지 축소하는 Minimal PoC 생성, 결과를 evidence로 저장
 - Adapter Contract Test: 5종 Target Adapter(Fake LLM/Agent/RAG, OpenAI-compatible, CustomHTTP) 전체가 metadata/capabilities/healthcheck/send/trace/reset_session 계약을 동일하게 만족하는지 하나의 테스트 스위트로 검증
+- GitHub Actions CI: push/PR마다 `ruff`(버그성 규칙만) → `pytest` → `doctor`/`judge-benchmark`/`sample-run`×3/`scan --profile full` smoke → raw evidence/private report 미포함 확인까지 자동 실행 (Python 3.11/3.12 매트릭스)
 
 ## 빠른 시작
 

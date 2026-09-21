@@ -3,11 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from adapters.discovery.ffuf import FfufAdapter
-from adapters.discovery.katana import KatanaAdapter
 from adapters.llm.pyrit import PyRITAdapter
-from adapters.recon.httpx import HttpxAdapter
-from adapters.recon.subfinder import SubfinderAdapter
 from adapters.scanner.dalfox import DalfoxAdapter
 from adapters.scanner.nuclei import NucleiAdapter
 from adapters.secrets.trufflehog import TruffleHogAdapter
