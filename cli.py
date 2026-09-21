@@ -24,6 +24,7 @@ from core.orchestrator import (
 )
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
+from hybrid.correlate import correlate_source_and_live
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from live.auto_profile import auto_profile_candidates
 from live.classify import classify_items
@@ -270,6 +271,14 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_correlate(args: argparse.Namespace) -> int:
+    policy = PolicyEngine.from_yaml(args.scope)
+    live_result = asyncio.run(discover_target(args.url, policy, max_pages=args.max_pages))
+    result = correlate_source_and_live(args.source, live_result, max_files=args.max_files)
+    print(_json(result.to_dict()))
+    return 0
+
+
 def cmd_recon(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
@@ -477,6 +486,18 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("path", type=Path)
     audit.add_argument("--max-files", type=int, default=2000)
     audit.set_defaults(func=cmd_audit)
+
+    correlate = sub.add_parser(
+        "correlate",
+        help="U8 HYBRID MODE: correlate SOURCE static analysis with a LIVE discovery crawl of the same target "
+        "(source-detected routes also seen live get a confidence boost and provenance from both sides)",
+    )
+    correlate.add_argument("source", type=Path)
+    correlate.add_argument("url")
+    correlate.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    correlate.add_argument("--max-pages", type=int, default=5)
+    correlate.add_argument("--max-files", type=int, default=2000)
+    correlate.set_defaults(func=cmd_correlate)
 
     discover = sub.add_parser(
         "discover",

@@ -31,6 +31,7 @@ packages = [
   "attack_surface",
   "attacks",
   "core",
+  "hybrid",
   "live",
   "packs",
   "findings",
