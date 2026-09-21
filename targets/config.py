@@ -6,10 +6,11 @@ from typing import Any
 
 import yaml
 
+from manifest.loader import build_manifest_target
 from targets.base import TargetAdapter
 from targets.http_target import CustomHTTPAdapter, CustomHTTPConfig, HTTPTargetConfig, OpenAICompatibleTarget
 
-_SUPPORTED_ADAPTERS = {"openai_compatible", "custom_http"}
+_SUPPORTED_ADAPTERS = {"openai_compatible", "custom_http", "universal"}
 
 
 def _resolve_auth_header(auth: dict[str, Any]) -> dict[str, str]:
@@ -43,6 +44,13 @@ def load_target(path: Path | str) -> TargetAdapter:
         )
     if "base_url" not in target:
         raise ValueError(f"target config {path} is missing required field 'base_url'")
+
+    if adapter_kind == "universal":
+        # U10 Universal Manifest: a richer, differently-shaped schema
+        # (auth/interaction/session sections) -- resolved entirely by
+        # manifest.loader rather than this function's
+        # openai_compatible/custom_http-specific headers/auth handling.
+        return build_manifest_target(target)
 
     headers: dict[str, str] = {"Content-Type": "application/json"}
     headers.update(_resolve_auth_header(target.get("auth") or {}))
