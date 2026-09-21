@@ -52,7 +52,7 @@ async def run_sample_pipeline(
             "seed": 0,
             "system_prompt_hash": "none",
             "tool_schema_hash": "none",
-            "rag_corpus_hash": "none",
+            "rag_corpus_hash": target_metadata.extra.get("rag_corpus_hash", "none"),
             "testcase_version": "basic",
             "policy_hash": policy.policy_hash,
         }
@@ -245,7 +245,7 @@ async def run_adaptive_pipeline(
             "seed": 0,
             "system_prompt_hash": "none",
             "tool_schema_hash": "none",
-            "rag_corpus_hash": "none",
+            "rag_corpus_hash": target_metadata.extra.get("rag_corpus_hash", "none"),
             "testcase_version": "adaptive",
             "policy_hash": policy.policy_hash,
         }
