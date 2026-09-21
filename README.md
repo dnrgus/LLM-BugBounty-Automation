@@ -30,6 +30,7 @@
 - Full Orchestrator: `scan --profile {quick,llm,agent,rag,web,full}`이 scope/policy → recon → classify → scan → judge → reproduce → dedup → report를 프로필별 설정(judges/executor/reproduction/mutation/target)으로 end-to-end 연결. `full` 프로필은 LLM/Agent/RAG scan과 PyRIT adaptive 결과를 하나의 root cause cluster로 통합
 - Hardening: 외부 도구 출력의 score 필드 타입 변경(예: 숫자 → 문자열 라벨)이 파서를 crash시키지 않고 graceful하게 처리, Evidence Sanitizer에 AWS access key/PEM private key 패턴 추가, clean install(`pip install -e ".[dev]"` → `pytest` → `scan --profile full`)을 별도 venv에서 검증
 - 실제 Target Adapter: `--target openai`(OpenAI 호환 Chat Completions API)와 `--target-config`(YAML로 설정하는 자체 스키마 REST API, `CustomHTTPAdapter`)로 실제 요청 전송. 세션별 multi-turn 대화 이력 유지, `Target*Error` 타입 체계(연결 실패/인증 실패/429/5xx/응답 파싱 실패)로 실패 원인 구분, `httpx.MockTransport` 기반 hermetic 테스트로 실제 네트워크 없이 검증(+ 로컬 mock 서버로 진짜 end-to-end 실행도 확인). API 키는 환경변수로만 주입 (커밋되지 않음)
+- Attack Budget: request/token/cost/runtime 예산과 카테고리별(per-suite) 예산을 프로필(`config/pipeline.yaml`)에 선언하면 `scan`/`sample-run`이 예산 소진 시 자동으로 중단. 연속된 target 오류(`repeated_target_errors`)도 크래시 대신 graceful하게 중단하고 결과에 사유를 남김
 
 ## 빠른 시작
 
