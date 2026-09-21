@@ -29,9 +29,9 @@ packages = [
   "judges",
   "storage",
   "reporting",
+  "reproduction",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-
