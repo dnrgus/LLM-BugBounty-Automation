@@ -45,6 +45,7 @@
 - SOURCE MODE (`audit <path>`): 소스 트리를 정적 분석해 언어/프레임워크 감지, route(Flask/FastAPI/Express/Django) 추출, input source(request.args/json/body 등)·위험 sink(eval/os.system/pickle.loads/SQL 문자열 조합 등)·secret(AWS key/PEM/generic API key, 값 자체는 절대 저장 안 함)·LLM/RAG/Agent SDK 연동 패턴까지 탐지
 - LIVE MODE (`discover <url>`): URL만 갖고 있는 대상을 안전하게 passive crawl — GET/HEAD만 사용하고 공격 payload는 절대 전송하지 않음. 페이지 fingerprint(status/title/서버 헤더), form/인증 힌트(password form, set-cookie, www-authenticate), JS에서 추출한 API path·WebSocket URL·노출된 source map, AI/LLM 관련 키워드 힌트를 `AttackSurfaceItem`으로 수집. 발견된 링크/스크립트도 전부 다시 Scope/Policy 검증을 통과해야 fetch됨 (동일 출처 여부가 아니라 Scope 설정이 유일한 기준)
 - Auto Profiler (`discover --classify` / `--auto-profile`): LIVE MODE 결과를 web/api/graphql/llm/rag/agent/websocket 후보로 분류. `--auto-profile`은 그중 llm/api 후보를 기존 Capability Probe(`core/profiler.py`)로 연결해 실제로 찔러봄 — 스키마를 모르는 블랙박스 엔드포인트라 몇 가지 흔한 요청/응답 형태를 순서대로 시도하는 best-effort이며, 모든 시도는 다시 한 번 독립적으로 Scope/Policy 검증을 통과해야 함
+- Pack Selector (`discover --select-packs`): 분류된 target 능력(web/api/graphql/llm/rag/agent/websocket) × Policy(`testing.*` 카테고리 허용 여부) × Budget(예상 요청 비용 대비 잔여 예산)을 기준으로 어떤 Attack Pack을 실행할지 결정. 적용 대상이 아니거나, 정책이 막거나, 예산이 부족한 경우도 전부 이유와 함께 기록 (discovery의 `skipped_out_of_scope`와 동일한 투명성 원칙). Pack이 실제 도구(Nuclei/Dalfox/TruffleHog)에 연결되는 것은 U7에서 진행 예정
 
 ## 빠른 시작
 
@@ -137,6 +138,9 @@ python main.py discover https://target.example.com --scope config/my-scope.yaml 
 
 # Auto Profiler: discovery 결과를 web/api/graphql/llm/rag/agent/websocket으로 분류 + Capability Probe 연결
 python main.py discover https://target.example.com --scope config/my-scope.yaml --classify --auto-profile
+
+# Pack Selector: 분류 결과 + policy + (선택) budget 기준으로 어떤 Attack Pack을 실행할지 결정
+python main.py discover https://target.example.com --scope config/my-scope.yaml --select-packs --pack-budget-requests 200
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark

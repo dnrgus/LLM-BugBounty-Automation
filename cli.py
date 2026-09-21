@@ -13,6 +13,7 @@ from adapters.scanner.nuclei import NucleiAdapter
 from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
+from core.budget import AttackBudget
 from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import (
     run_adaptive_pipeline,
@@ -27,6 +28,7 @@ from judges.benchmark import load_benchmark_cases, run_benchmark
 from live.auto_profile import auto_profile_candidates
 from live.classify import classify_items
 from live.discovery import discover_target
+from packs.selector import select_packs
 from recon.pipeline import build_asset_map
 from source.audit import audit_source
 from scope.policy import PolicyEngine
@@ -224,13 +226,18 @@ def cmd_discover(args: argparse.Namespace) -> int:
     result = asyncio.run(discover_target(args.url, policy, max_pages=args.max_pages))
     payload = result.to_dict()
 
-    if args.classify or args.auto_profile:
+    if args.classify or args.auto_profile or args.select_packs:
         candidates = classify_items(result.items)
         payload["classification"] = [candidate.to_dict() for candidate in candidates]
         if args.auto_profile:
             store = SQLiteStore(args.db)
             profiles = asyncio.run(auto_profile_candidates(candidates, policy, store))
             payload["auto_profile"] = [profile_result.to_dict() for profile_result in profiles]
+        if args.select_packs:
+            budget = AttackBudget(max_requests=args.pack_budget_requests) if args.pack_budget_requests else None
+            target_kinds = {candidate.kind for candidate in candidates}
+            selections = select_packs(target_kinds, policy, budget=budget)
+            payload["pack_selection"] = [selection.to_dict() for selection in selections]
 
     print(_json(payload))
     return 0
@@ -466,6 +473,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="U5 Auto Profiler: classify, then hand llm/api candidates to the Capability Probe for best-effort verification (implies --classify)",
     )
     discover.add_argument("--db", type=Path, default=Path("runs/discover.sqlite"))
+    discover.add_argument(
+        "--select-packs", action="store_true",
+        help="U6 Pack Selector: classify, then decide which Attack Packs apply given policy and (optional) budget",
+    )
+    discover.add_argument(
+        "--pack-budget-requests", type=int, default=None,
+        help="Optional request budget ceiling used only for --select-packs' budget check",
+    )
     discover.set_defaults(func=cmd_discover)
 
     scan = sub.add_parser(
