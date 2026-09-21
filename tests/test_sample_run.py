@@ -17,6 +17,8 @@ def test_sample_pipeline_creates_candidate(tmp_path: Path) -> None:
     )
     assert result["finding_count"] == 1
     assert result["reports"]
+    assert any(path.endswith(".md") for path in result["reports"])
+    assert any(path.endswith(".json") for path in result["reports"])
     assert result["reproductions"]["confirmed"] == 1
 
 
