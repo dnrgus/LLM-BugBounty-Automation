@@ -28,6 +28,7 @@ packages = [
   "adapters.discovery",
   "adapters.scanner",
   "adapters.secrets",
+  "attack_surface",
   "attacks",
   "core",
   "findings",
