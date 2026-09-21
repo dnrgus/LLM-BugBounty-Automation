@@ -10,6 +10,7 @@ tools:
   pyrit:
     enabled: true
     category: llm_redteam
+    output: json
   subfinder:
     enabled: true
     category: recon

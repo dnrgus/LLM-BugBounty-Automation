@@ -2,6 +2,7 @@ from pathlib import Path
 
 from adapters.llm.garak import GarakAdapter
 from adapters.llm.promptfoo import PromptfooAdapter
+from adapters.llm.pyrit import PyRITAdapter
 from core.tool_doctor import check_tools, write_tool_lock
 
 
@@ -34,6 +35,24 @@ def test_garak_adapter_normalizes_findings() -> None:
     assert result.title == "leak.SystemPrompt / canary.String"
     assert result.detector_score == 0.88
     assert result.framework_tags["mitre_atlas"] == ["AML.T0057"]
+
+
+def test_pyrit_adapter_normalizes_adaptive_results() -> None:
+    results = PyRITAdapter().parse_file(
+        Path("tests/fixtures/tools/pyrit-results.json"),
+        run_id="run_1",
+        target_id="target_1",
+        version="0.5",
+    )
+    assert len(results) == 1
+    result = results[0]
+    assert result.source.tool == "pyrit"
+    assert result.category == "tool_abuse"
+    assert result.testcase_id == "LLM-TOOL-001"
+    assert result.detector_score == 0.91
+    assert result.framework_tags["owasp_agentic_2026"] == ["AA02"]
+    assert result.metadata["strategy"] == "crescendo"
+    assert result.metadata["turn_count"] == 4
 
 
 def test_tool_doctor_snapshot_and_lock(tmp_path: Path) -> None:

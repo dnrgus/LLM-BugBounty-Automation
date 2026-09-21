@@ -7,6 +7,8 @@ from pathlib import Path
 
 from adapters.llm.garak import GarakAdapter
 from adapters.llm.promptfoo import PromptfooAdapter
+from adapters.llm.pyrit import PyRITAdapter
+from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import run_sample_pipeline
@@ -128,11 +130,35 @@ def cmd_mutate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_adaptive_plan(args: argparse.Namespace) -> int:
+    testcases = load_testcases(args.testcases)
+    testcase_by_id = {case.id: case for case in testcases}
+    results = PyRITAdapter().parse_file(args.input, run_id=args.run_id, target_id=args.target_id, version=args.version)
+    planner = AdaptivePlanner()
+    store = SQLiteStore(args.db) if args.db else None
+    if store is not None:
+        store.initialize()
+    plans = []
+    for result in results:
+        testcase = testcase_by_id.get(result.testcase_id) if result.testcase_id else None
+        if testcase is None:
+            continue
+        plan = planner.plan_from_result(result, testcase)
+        plans.append(plan)
+        if store is not None:
+            for mutation in plan.mutations:
+                store.insert_mutation(mutation.to_record())
+    print(_json({"plans": [plan.to_dict() for plan in plans]}))
+    return 0
+
+
 def _adapter_for_tool(tool: str):
     if tool == "promptfoo":
         return PromptfooAdapter()
     if tool == "garak":
         return GarakAdapter()
+    if tool == "pyrit":
+        return PyRITAdapter()
     raise ValueError(f"unsupported tool: {tool}")
 
 
@@ -177,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     judge_benchmark.set_defaults(func=cmd_judge_benchmark)
 
     normalize = sub.add_parser("normalize-tool-output", help="Normalize external LLM tool output")
-    normalize.add_argument("--tool", choices=["promptfoo", "garak"], required=True)
+    normalize.add_argument("--tool", choices=["promptfoo", "garak", "pyrit"], required=True)
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--run-id", default="run_fixture")
     normalize.add_argument("--target-id", default="target_fixture")
@@ -191,6 +217,18 @@ def build_parser() -> argparse.ArgumentParser:
     mutate.add_argument("--var", action="append", nargs=2, metavar=("KEY", "VALUE"))
     mutate.add_argument("--db", type=Path)
     mutate.set_defaults(func=cmd_mutate)
+
+    adaptive_plan = sub.add_parser(
+        "adaptive-plan",
+        help="Generate adaptive mutation plans from PyRIT adaptive redteam results",
+    )
+    adaptive_plan.add_argument("--input", type=Path, required=True)
+    adaptive_plan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    adaptive_plan.add_argument("--run-id", default="run_fixture")
+    adaptive_plan.add_argument("--target-id", default="target_fixture")
+    adaptive_plan.add_argument("--version")
+    adaptive_plan.add_argument("--db", type=Path)
+    adaptive_plan.set_defaults(func=cmd_adaptive_plan)
 
     return parser
 

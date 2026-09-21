@@ -18,8 +18,9 @@
 - Executor session/checkpoint, timeout, retry, idempotency key, trace export
 - Reproducer repeat attempts, negative controls, confirmed/unstable/rejected 상태 전이
 - deterministic judge, judge benchmark, raw/sanitized evidence, redaction log, Markdown/JSON report
-- Tool Doctor version snapshot, Promptfoo/Garak output normalization
+- Tool Doctor version snapshot, Promptfoo/Garak/PyRIT output normalization
 - Mutation Engine 전략 변형, lineage, hash dedup, 전략별 통계
+- PyRIT adaptive redteam 결과 기반 Adaptive Mutation Plan 생성 (multi-turn 성공 시나리오를 후속 mutation lineage로 연계)
 
 ## 빠른 시작
 
@@ -92,6 +93,12 @@ python main.py normalize-tool-output --tool promptfoo --input tests/fixtures/too
 
 # Prompt mutation 생성
 python main.py mutate --testcase-id LLM-TOOL-001 --strategy json_wrap --var RESOURCE "admin console"
+
+# PyRIT adaptive redteam 결과 정규화
+python main.py normalize-tool-output --tool pyrit --input tests/fixtures/tools/pyrit-results.json
+
+# PyRIT 성공 시나리오 기반 Adaptive Mutation Plan 생성
+python main.py adaptive-plan --input tests/fixtures/tools/pyrit-results.json
 ```
 
 ## 산출물
