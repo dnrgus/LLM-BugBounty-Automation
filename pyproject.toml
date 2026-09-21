@@ -28,6 +28,7 @@ packages = [
   "adapters.secrets",
   "attacks",
   "core",
+  "findings",
   "recon",
   "rag_harness",
   "scope",

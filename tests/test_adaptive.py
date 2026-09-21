@@ -97,6 +97,9 @@ def test_adaptive_pipeline_feeds_pyrit_results_through_judge_and_reproducer(tmp_
     assert {row["testcase_id"] for row in findings} == {
         f"LLM-SP-001::{mutation['id']}" for mutation in result["plans"][0]["mutations"]
     }
+    assert len(result["clusters"]) == 1
+    assert result["clusters"][0]["count"] == 3
+    assert any(path.endswith("_root_cause_clusters.json") for path in result["reports"])
 
 
 def test_adaptive_run_cli_outputs_json(tmp_path: Path) -> None:

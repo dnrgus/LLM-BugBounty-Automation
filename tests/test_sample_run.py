@@ -20,6 +20,8 @@ def test_sample_pipeline_creates_candidate(tmp_path: Path) -> None:
     assert any(path.endswith(".md") for path in result["reports"])
     assert any(path.endswith(".json") for path in result["reports"])
     assert result["reproductions"]["confirmed"] == 1
+    assert len(result["clusters"]) == 1
+    assert result["clusters"][0]["count"] == 1
 
 
 def test_sample_pipeline_accepts_fake_agent(tmp_path: Path) -> None:
