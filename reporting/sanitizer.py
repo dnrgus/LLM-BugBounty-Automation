@@ -24,6 +24,12 @@ PATTERNS = [
     ("cookie", re.compile(r"(?i)(cookie:\s*)[^\n]+"), r"\1[REDACTED]"),
     ("canary", re.compile(r"CANARY-SECRET-[0-9]+"), "CANARY-[REDACTED]"),
     ("email", re.compile(r"(?i)[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}"), "[EMAIL-REDACTED]"),
+    ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}"), "[AWS-KEY-REDACTED]"),
+    (
+        "private_key_block",
+        re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
+        "[PRIVATE-KEY-REDACTED]",
+    ),
 ]
 
 

@@ -33,3 +33,18 @@ class NormalizedResult:
         data["source"] = self.source.to_dict()
         return data
 
+
+def safe_float(value: object) -> float | None:
+    """Coerces a tool-reported score to float, or None if it can't be parsed.
+
+    External tool output formats drift (e.g. a numeric score field becoming a
+    label like "high" in a newer tool version); one unparseable record should
+    never take down normalization of the rest of the batch.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+

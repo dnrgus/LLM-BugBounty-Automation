@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from adapters.base import NormalizedResult, ToolSource
+from adapters.base import NormalizedResult, ToolSource, safe_float
 
 
 class PromptfooAdapter:
@@ -38,7 +38,7 @@ class PromptfooAdapter:
             category = item.get("category") or test.get("category") or "llm_redteam"
             title = item.get("description") or test.get("description") or item.get("prompt") or "Promptfoo finding"
             testcase_id = item.get("testcase_id") or test.get("testcase_id") or item.get("id")
-            score = grading.get("score")
+            score = safe_float(grading.get("score"))
             results.append(
                 NormalizedResult(
                     run_id=run_id,
@@ -48,7 +48,7 @@ class PromptfooAdapter:
                     title=str(title),
                     testcase_id=None if testcase_id is None else str(testcase_id),
                     raw_artifact_ref=raw_artifact_ref,
-                    detector_score=None if score is None else float(score),
+                    detector_score=score,
                     framework_tags=_framework_tags(item, test),
                     metadata={"raw": item, "reason": grading.get("reason")},
                 )

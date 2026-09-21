@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from adapters.base import safe_float
 from adapters.llm.garak import GarakAdapter
 from adapters.llm.promptfoo import PromptfooAdapter
 from adapters.llm.pyrit import PyRITAdapter
@@ -110,6 +111,55 @@ def test_trufflehog_adapter_never_leaks_raw_secret() -> None:
     dump = json.dumps([finding.to_dict() for finding in findings])
     assert "AKIAABCDEFGHIJKLMNOP" not in dump
     assert "xoxb-1234-5678-abcd" not in dump
+
+
+def test_safe_float_coerces_or_returns_none() -> None:
+    assert safe_float(None) is None
+    assert safe_float("0.9") == 0.9
+    assert safe_float(1) == 1.0
+    assert safe_float("high") is None
+    assert safe_float(object()) is None
+
+
+def test_promptfoo_adapter_survives_non_numeric_score() -> None:
+    # A tool output field changing type (e.g. score becoming a label like
+    # "bad" in a newer promptfoo version) must degrade to detector_score=None,
+    # never crash normalization of the rest of the batch.
+    results = PromptfooAdapter().parse(
+        {"results": [{"gradingResult": {"pass": False, "score": "bad"}}]},
+        run_id="run_1",
+        target_id="target_1",
+    )
+    assert len(results) == 1
+    assert results[0].detector_score is None
+
+
+def test_garak_adapter_survives_non_numeric_detector_score() -> None:
+    results = GarakAdapter().parse(
+        [{"passed": False, "detector_score": "n/a"}],
+        run_id="run_1",
+        target_id="target_1",
+    )
+    assert len(results) == 1
+    assert results[0].detector_score is None
+
+
+def test_pyrit_adapter_survives_non_numeric_score() -> None:
+    results = PyRITAdapter().parse(
+        {"attempts": [{"success": True, "score": "high"}]},
+        run_id="run_1",
+        target_id="target_1",
+    )
+    assert len(results) == 1
+    assert results[0].detector_score is None
+    # an unparseable score with no explicit success flag must not be treated
+    # as a finding (no false positive from a coercion crash being swallowed)
+    dropped = PyRITAdapter().parse(
+        {"attempts": [{"success": False, "score": "n/a"}]},
+        run_id="run_1",
+        target_id="target_1",
+    )
+    assert dropped == []
 
 
 def test_tool_doctor_snapshot_and_lock(tmp_path: Path) -> None:

@@ -15,6 +15,19 @@ def test_sanitize_text_redacts_sensitive_values() -> None:
     assert {item.name for item in redactions} == {"authorization_bearer", "cookie", "email", "canary"}
 
 
+def test_sanitize_text_redacts_aws_key_and_private_key_block() -> None:
+    text = (
+        "leaked key: AKIAABCDEFGHIJKLMNOP\n"
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+        "MIIBOgIBAAJBAK...\n"
+        "-----END RSA PRIVATE KEY-----\n"
+    )
+    sanitized, redactions = sanitize_text(text)
+    assert "AKIAABCDEFGHIJKLMNOP" not in sanitized
+    assert "MIIBOgIBAAJBAK" not in sanitized
+    assert {item.name for item in redactions} == {"aws_access_key", "private_key_block"}
+
+
 def test_evidence_bundle_writes_hashes_and_redaction_log(tmp_path: Path) -> None:
     bundle = write_evidence_bundle(
         tmp_path / "raw",
