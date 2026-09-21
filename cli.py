@@ -85,14 +85,16 @@ def cmd_sample_run(args: argparse.Namespace) -> int:
     testcases = load_testcases(args.testcases)
     engine = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
-    result = asyncio.run(run_sample_pipeline(engine, testcases, store, target_kind=args.target))
+    result = asyncio.run(
+        run_sample_pipeline(engine, testcases, store, target_kind=args.target, target_config=args.target_config)
+    )
     print(_json(result))
     return 0
 
 
 def cmd_coverage(args: argparse.Namespace) -> int:
     testcases = load_testcases(args.testcases)
-    target = create_target(args.target)
+    target = create_target(args.target, args.target_config)
     capabilities = asyncio.run(target.capabilities())
     policy = PolicyEngine.from_yaml(args.scope)
     selected = select_executable_testcases(testcases, capabilities, policy)
@@ -164,7 +166,9 @@ def cmd_adaptive_run(args: argparse.Namespace) -> int:
     engine = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
     result = asyncio.run(
-        run_adaptive_pipeline(engine, testcases, store, args.input, target_kind=args.target)
+        run_adaptive_pipeline(
+            engine, testcases, store, args.input, target_kind=args.target, target_config=args.target_config
+        )
     )
     print(_json(result))
     return 0
@@ -262,12 +266,18 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     sample.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
     sample.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
+    sample.add_argument(
+        "--target-config",
+        type=Path,
+        help="YAML target config (see config/targets/*.example.yaml); overrides --target",
+    )
     sample.set_defaults(func=cmd_sample_run)
 
     coverage = sub.add_parser("coverage", help="Show testcase coverage for a target profile")
     coverage.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     coverage.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     coverage.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
+    coverage.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
     coverage.set_defaults(func=cmd_coverage)
 
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
@@ -315,6 +325,7 @@ def build_parser() -> argparse.ArgumentParser:
     adaptive_run.add_argument("--input", type=Path, required=True)
     adaptive_run.add_argument("--db", type=Path, default=Path("runs/adaptive.sqlite"))
     adaptive_run.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
+    adaptive_run.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
     adaptive_run.set_defaults(func=cmd_adaptive_run)
 
     recon = sub.add_parser(

@@ -1,0 +1,105 @@
+from pathlib import Path
+
+import pytest
+
+from targets.config import load_target
+from targets.http_target import CustomHTTPAdapter, OpenAICompatibleTarget
+
+FIXTURES = Path("tests/fixtures/targets")
+
+
+def test_load_target_builds_openai_compatible_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TARGET_API_KEY", "sk-test")
+    config_path = tmp_path / "openai.yaml"
+    config_path.write_text(
+        """
+target:
+  id: lab-openai
+  adapter: openai_compatible
+  base_url: https://lab.example.com/v1
+  model: lab-model
+  auth:
+    api_key_env: TEST_TARGET_API_KEY
+  timeout_seconds: 15
+  capabilities:
+    chat: true
+""",
+        encoding="utf-8",
+    )
+    target = load_target(config_path)
+    assert isinstance(target, OpenAICompatibleTarget)
+    assert target.config.base_url == "https://lab.example.com/v1"
+    assert target.config.name == "lab-model"
+    assert target.config.headers["Authorization"] == "Bearer sk-test"
+    assert target.config.timeout_seconds == 15
+
+
+def test_load_target_builds_custom_http_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TARGET_API_KEY", "cookie-value")
+    config_path = tmp_path / "custom.yaml"
+    config_path.write_text(
+        """
+target:
+  id: lab-custom
+  adapter: custom_http
+  base_url: https://lab.example.com
+  auth:
+    api_key_env: TEST_TARGET_API_KEY
+    header_name: X-Session-Token
+    header_prefix: ""
+  request:
+    method: POST
+    path: /api/chat
+    body_template:
+      message: "{{PROMPT}}"
+      conversation_id: "{{SESSION}}"
+    response_text_path: reply.text
+  capabilities:
+    chat: true
+    rag: true
+""",
+        encoding="utf-8",
+    )
+    target = load_target(config_path)
+    assert isinstance(target, CustomHTTPAdapter)
+    assert target.config.request_path == "/api/chat"
+    assert target.config.response_text_path == "reply.text"
+    assert target.config.headers["X-Session-Token"] == "cookie-value"
+
+
+def test_load_target_requires_api_key_env_to_be_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MISSING_TARGET_KEY", raising=False)
+    config_path = tmp_path / "target.yaml"
+    config_path.write_text(
+        """
+target:
+  adapter: openai_compatible
+  base_url: https://lab.example.com/v1
+  auth:
+    api_key_env: MISSING_TARGET_KEY
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="MISSING_TARGET_KEY"):
+        load_target(config_path)
+
+
+def test_load_target_rejects_unsupported_adapter(tmp_path: Path) -> None:
+    config_path = tmp_path / "bad.yaml"
+    config_path.write_text(
+        """
+target:
+  adapter: websocket
+  base_url: https://lab.example.com
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unsupported adapter"):
+        load_target(config_path)
+
+
+def test_load_target_requires_base_url(tmp_path: Path) -> None:
+    config_path = tmp_path / "no-url.yaml"
+    config_path.write_text("target:\n  adapter: openai_compatible\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="base_url"):
+        load_target(config_path)

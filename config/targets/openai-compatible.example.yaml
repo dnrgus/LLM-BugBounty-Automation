@@ -1,0 +1,22 @@
+# Target config for an OpenAI-compatible Chat Completions API
+# (OpenAI, Azure OpenAI, vLLM/LiteLLM/Ollama's OpenAI shim, etc).
+#
+# Usage:
+#   export TARGET_API_KEY=sk-...
+#   python main.py sample-run --target-config config/targets/openai-compatible.example.yaml \
+#     --scope config/my-scope.yaml
+#
+# Copy this file, point base_url/model at your authorized target, and never
+# commit the real API key -- only the env var *name* goes here.
+
+target:
+  id: example-openai-target
+  adapter: openai_compatible
+  base_url: https://lab.example.com/v1
+  model: target-model
+  auth:
+    api_key_env: TARGET_API_KEY
+  timeout_seconds: 30
+  capabilities:
+    chat: true
+    sessions: true

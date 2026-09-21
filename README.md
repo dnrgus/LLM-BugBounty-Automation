@@ -29,7 +29,7 @@
 - Finding Dedup/Root Cause Clustering: category+seed testcase 기반 exact dedup과 제목 유사도 기반 heuristic dedup, root_cause_key는 run 간에도 안정적이라 동일 원인 재발을 연결 가능. `sample-run`/`adaptive-run`이 root cause cluster report를 자동 생성
 - Full Orchestrator: `scan --profile {quick,llm,agent,rag,web,full}`이 scope/policy → recon → classify → scan → judge → reproduce → dedup → report를 프로필별 설정(judges/executor/reproduction/mutation/target)으로 end-to-end 연결. `full` 프로필은 LLM/Agent/RAG scan과 PyRIT adaptive 결과를 하나의 root cause cluster로 통합
 - Hardening: 외부 도구 출력의 score 필드 타입 변경(예: 숫자 → 문자열 라벨)이 파서를 crash시키지 않고 graceful하게 처리, Evidence Sanitizer에 AWS access key/PEM private key 패턴 추가, clean install(`pip install -e ".[dev]"` → `pytest` → `scan --profile full`)을 별도 venv에서 검증
-- 실제 Target Adapter: `--target openai`로 OpenAI 호환 Chat Completions API(OpenAI/Azure OpenAI/vLLM·LiteLLM·Ollama 등 OpenAI 호환 게이트웨이)에 실제 요청 전송. 세션별 multi-turn 대화 이력 유지, `httpx.MockTransport` 기반 hermetic 테스트로 실제 네트워크 없이 검증. API 키는 `OPENAI_API_KEY` 환경변수로만 주입 (커밋되지 않음)
+- 실제 Target Adapter: `--target openai`(OpenAI 호환 Chat Completions API)와 `--target-config`(YAML로 설정하는 자체 스키마 REST API, `CustomHTTPAdapter`)로 실제 요청 전송. 세션별 multi-turn 대화 이력 유지, `Target*Error` 타입 체계(연결 실패/인증 실패/429/5xx/응답 파싱 실패)로 실패 원인 구분, `httpx.MockTransport` 기반 hermetic 테스트로 실제 네트워크 없이 검증(+ 로컬 mock 서버로 진짜 end-to-end 실행도 확인). API 키는 환경변수로만 주입 (커밋되지 않음)
 
 ## 빠른 시작
 
@@ -94,6 +94,12 @@ python main.py sample-run
 # 허용돼 있어야 하고, 대상 프로그램의 서면 허가가 있어야만 사용할 것)
 export OPENAI_API_KEY=sk-...
 python main.py sample-run --target openai --scope config/my-scope.yaml
+
+# 자체 REST 스키마 API 대상 실행 (config/targets/*.example.yaml 참고, 코드 작성 불필요)
+cp config/targets/custom-http.example.yaml config/targets/my-target.yaml
+# my-target.yaml의 base_url/request/response_text_path를 실제 스펙에 맞게 수정
+export TARGET_API_KEY=...
+python main.py sample-run --target-config config/targets/my-target.yaml --scope config/my-scope.yaml
 
 # 재현성 fingerprint 생성
 python main.py fingerprint
@@ -195,7 +201,8 @@ git status --short
 
 ### 알려진 제한사항 (Known Limitations)
 
-- 실제 Target Adapter는 OpenAI 호환 Chat Completions API(`--target openai`)만 있음. 자체 스키마의 Custom REST API, 브라우저 자동화가 필요한 웹 챗봇 UI, WebSocket 기반 API용 Adapter는 아직 없음 (`targets/base.py`의 계약을 구현하면 추가 가능 — `targets/http_target.py`가 참고 예시)
+- 실제 Target Adapter는 OpenAI 호환 API(`--target openai`)와 자체 REST 스키마(`--target-config`, `CustomHTTPAdapter`)까지만 있음. 브라우저 자동화가 필요한 웹 챗봇 UI, WebSocket 기반 API, MCP/Tool 호출을 하는 Agent용 Adapter는 아직 없음 (`targets/base.py`의 계약을 구현하면 추가 가능 — `targets/http_target.py`가 참고 예시)
+- Capability는 target config에 수동으로 선언해야 함 (`capabilities: {chat: true, ...}`). 실제로 대상에 probe를 보내 자동 감지하는 Capability Probe는 아직 없음
 - Promptfoo/Garak/PyRIT/Nuclei/Dalfox/TruffleHog는 실제 CLI를 직접 실행하지 않고, 각 도구가 생성한 JSON/JSONL 출력 파일을 정규화하는 방식만 지원 (Adapter-first 설계 원칙에 따름)
 - RAG retrieval은 실제 embedding/vector store가 아니라 오프라인 재현성을 위한 결정론적 Jaccard 토큰 overlap으로 근사됨
 - Root Cause Clustering은 단일 패스 greedy 그룹핑이며 pgvector 기반 semantic clustering은 v2 계획 (설계서 22절)
