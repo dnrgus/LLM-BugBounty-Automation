@@ -1,0 +1,34 @@
+# Target config for a bug bounty target's own bespoke REST chat/completion
+# endpoint -- most real targets do NOT speak the OpenAI schema, so this is
+# usually the adapter you actually need.
+#
+# request.body_template is rendered with {{PROMPT}}, {{SESSION}}, and
+# {{HISTORY_JSON}} substituted into any string value, at any nesting depth,
+# so it can match whatever JSON shape the target's API expects.
+# response.response_text_path is a dot-separated path (list indices as plain
+# integers, e.g. "choices.0.text") into the parsed JSON response body.
+#
+# Usage:
+#   export TARGET_API_KEY=...
+#   python main.py sample-run --target-config config/targets/custom-http.example.yaml \
+#     --scope config/my-scope.yaml
+
+target:
+  id: example-custom-target
+  adapter: custom_http
+  base_url: https://lab.example.com
+  auth:
+    api_key_env: TARGET_API_KEY
+    header_name: Authorization
+    header_prefix: "Bearer "
+  timeout_seconds: 30
+  request:
+    method: POST
+    path: /api/chat
+    body_template:
+      message: "{{PROMPT}}"
+      session_id: "{{SESSION}}"
+    response_text_path: reply.text
+  capabilities:
+    chat: true
+    sessions: true

@@ -50,8 +50,9 @@ async def run_sample_pipeline(
     store: SQLiteStore,
     target_kind: str = "fake-llm",
     profile: PipelineProfile | None = None,
+    target_config: Path | str | None = None,
 ) -> dict[str, object]:
-    target = create_target(target_kind)
+    target = create_target(target_kind, target_config)
     capabilities = await target.capabilities()
     target_metadata = await target.metadata()
     selected = select_executable_testcases(testcases, capabilities, policy)
@@ -268,8 +269,9 @@ async def run_adaptive_pipeline(
     store: SQLiteStore,
     pyrit_input: Path | str,
     target_kind: str = "fake-llm",
+    target_config: Path | str | None = None,
 ) -> dict[str, object]:
-    target = create_target(target_kind)
+    target = create_target(target_kind, target_config)
     capabilities = await target.capabilities()
     target_metadata = await target.metadata()
     testcase_by_id = {case.id: case for case in testcases}
