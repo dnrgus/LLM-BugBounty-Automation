@@ -1,0 +1,1 @@
+"""Web scanner adapters."""

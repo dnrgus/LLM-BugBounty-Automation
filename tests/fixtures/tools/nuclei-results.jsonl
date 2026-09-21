@@ -1,0 +1,2 @@
+{"template-id":"exposed-env-file","info":{"name":"Exposed .env File","severity":"high","tags":["exposure","config","misconfig"]},"host":"https://ai.example.com","matched-at":"https://ai.example.com/.env","type":"http"}
+{"template-id":"tls-version-deprecated","info":{"name":"Deprecated TLS Version","severity":"info","tags":["tls","misconfig"]},"host":"https://ai.example.com","matched-at":"https://ai.example.com","type":"ssl"}

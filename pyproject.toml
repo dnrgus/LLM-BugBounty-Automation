@@ -24,6 +24,8 @@ packages = [
   "adapters.llm",
   "adapters.recon",
   "adapters.discovery",
+  "adapters.scanner",
+  "adapters.secrets",
   "attacks",
   "core",
   "recon",

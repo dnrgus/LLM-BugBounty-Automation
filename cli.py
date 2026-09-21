@@ -8,6 +8,9 @@ from pathlib import Path
 from adapters.llm.garak import GarakAdapter
 from adapters.llm.promptfoo import PromptfooAdapter
 from adapters.llm.pyrit import PyRITAdapter
+from adapters.scanner.dalfox import DalfoxAdapter
+from adapters.scanner.nuclei import NucleiAdapter
+from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
@@ -188,6 +191,12 @@ def _adapter_for_tool(tool: str):
         return GarakAdapter()
     if tool == "pyrit":
         return PyRITAdapter()
+    if tool == "nuclei":
+        return NucleiAdapter()
+    if tool == "dalfox":
+        return DalfoxAdapter()
+    if tool == "trufflehog":
+        return TruffleHogAdapter()
     raise ValueError(f"unsupported tool: {tool}")
 
 
@@ -232,7 +241,11 @@ def build_parser() -> argparse.ArgumentParser:
     judge_benchmark.set_defaults(func=cmd_judge_benchmark)
 
     normalize = sub.add_parser("normalize-tool-output", help="Normalize external LLM tool output")
-    normalize.add_argument("--tool", choices=["promptfoo", "garak", "pyrit"], required=True)
+    normalize.add_argument(
+        "--tool",
+        choices=["promptfoo", "garak", "pyrit", "nuclei", "dalfox", "trufflehog"],
+        required=True,
+    )
     normalize.add_argument("--input", type=Path, required=True)
     normalize.add_argument("--run-id", default="run_fixture")
     normalize.add_argument("--target-id", default="target_fixture")

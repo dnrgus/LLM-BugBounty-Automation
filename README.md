@@ -23,6 +23,7 @@
 - PyRIT adaptive redteam 결과 기반 Adaptive Mutation Plan 생성 (multi-turn 성공 시나리오를 후속 mutation lineage로 연계)
 - PyRIT 기반 Adaptive Mutation을 기존 Executor/Judge Ensemble/Reproducer 파이프라인에 그대로 유입해 Finding/Evidence/Report 생성
 - Subfinder/httpx/Katana/ffuf 결과를 Asset/Endpoint로 정규화하고 Scope Policy로 재검증하는 Recon 파이프라인
+- Nuclei/Dalfox 결과를 NormalizedResult(FindingCandidate)로, TruffleHog 결과를 SecretFinding으로 정규화 (원본 secret 값은 절대 저장/출력하지 않고 도구가 제공한 redacted 값만 사용)
 
 ## 빠른 시작
 
@@ -107,6 +108,13 @@ python main.py adaptive-plan --input tests/fixtures/tools/pyrit-results.json
 
 # PyRIT 기반 Adaptive Mutation을 Executor/Judge/Reproducer 경로로 실행해 Finding까지 생성
 python main.py adaptive-run --input tests/fixtures/tools/pyrit-results.json
+
+# Nuclei/Dalfox 결과 정규화 (FindingCandidate)
+python main.py normalize-tool-output --tool nuclei --input tests/fixtures/tools/nuclei-results.jsonl
+python main.py normalize-tool-output --tool dalfox --input tests/fixtures/tools/dalfox-results.json
+
+# TruffleHog 결과 정규화 (SecretFinding, redacted 값만 노출)
+python main.py normalize-tool-output --tool trufflehog --input tests/fixtures/tools/trufflehog-results.jsonl
 
 # Subfinder/httpx/Katana/ffuf 결과로 Asset/Endpoint map 생성 및 Scope 재검증
 python main.py recon \

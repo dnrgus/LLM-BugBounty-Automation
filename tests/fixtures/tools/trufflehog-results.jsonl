@@ -1,0 +1,2 @@
+{"DetectorName":"AWS","DetectorType":18,"Verified":true,"Redacted":"AKIA****************WXYZ","SourceName":"filesystem","SourceMetadata":{"Data":{"Filesystem":{"file":"config/settings.py","line":42}}},"Raw":"AKIAABCDEFGHIJKLMNOP"}
+{"DetectorName":"Slack","DetectorType":7,"Verified":false,"Redacted":"xoxb-****-****-****","SourceName":"filesystem","SourceMetadata":{"Data":{"Filesystem":{"file":"scripts/notify.sh","line":5}}},"Raw":"xoxb-1234-5678-abcd"}
