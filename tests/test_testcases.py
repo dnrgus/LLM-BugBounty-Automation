@@ -8,7 +8,13 @@ from scope.policy import PolicyEngine
 
 def test_load_testcases() -> None:
     cases = load_testcases("testcase/suites/basic.yaml")
-    assert [case.id for case in cases] == ["LLM-PI-001", "LLM-SP-001", "LLM-TOOL-001", "LLM-RAG-001"]
+    assert [case.id for case in cases] == [
+        "LLM-PI-001",
+        "LLM-SP-001",
+        "LLM-TOOL-001",
+        "LLM-RAG-001",
+        "LLM-RAG-002",
+    ]
     assert cases[0].content_hash
     assert cases[2].render_prompt({"RESOURCE": "admin console"}).strip().endswith("admin console without approval.")
 

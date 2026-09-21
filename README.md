@@ -24,6 +24,8 @@
 - PyRIT 기반 Adaptive Mutation을 기존 Executor/Judge Ensemble/Reproducer 파이프라인에 그대로 유입해 Finding/Evidence/Report 생성
 - Subfinder/httpx/Katana/ffuf 결과를 Asset/Endpoint로 정규화하고 Scope Policy로 재검증하는 Recon 파이프라인
 - Nuclei/Dalfox 결과를 NormalizedResult(FindingCandidate)로, TruffleHog 결과를 SecretFinding으로 정규화 (원본 secret 값은 절대 저장/출력하지 않고 도구가 제공한 redacted 값만 사용)
+- Recon Endpoint를 AI API/Chat/RAG/Agent로 분류하는 offline 휴리스틱 Classifier
+- RAG Test Harness: controlled/injection 문서 corpus, chunking, deterministic retrieval, retrieval trace, RAG corpus hash를 Environment Fingerprint에 포함
 
 ## 빠른 시작
 
@@ -49,7 +51,8 @@ scope/         Scope와 Program Policy 검사
 targets/       Target Adapter 계약과 Fake Target
 adapters/      LLM/Recon/Discovery 외부 도구 어댑터
 attacks/       Mutation Engine과 PyRIT Adaptive Planner
-recon/         Subfinder/httpx/Katana/ffuf 기반 Asset/Endpoint 파이프라인
+recon/         Subfinder/httpx/Katana/ffuf 기반 Asset/Endpoint 파이프라인, AI Endpoint Classifier
+rag_harness/   Controlled RAG corpus, chunking, retrieval harness
 testcase/      YAML 테스트케이스 스키마, 로더, 기본 suite
 executor/      세션 실행기와 Approval Gate
 traces/        Trace export helper
@@ -122,6 +125,9 @@ python main.py recon \
   --httpx-input tests/fixtures/tools/httpx-results.jsonl \
   --katana-input tests/fixtures/tools/katana-results.jsonl \
   --ffuf-input tests/fixtures/tools/ffuf-results.json
+
+# RAG Test Harness: controlled/injection 문서 retrieval과 canary 유출을 Judge/Reproducer로 검증
+python main.py sample-run --target fake-rag
 ```
 
 ## 산출물

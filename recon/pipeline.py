@@ -8,6 +8,7 @@ from adapters.discovery.katana import KatanaAdapter
 from adapters.recon.httpx import HttpxAdapter
 from adapters.recon.subfinder import SubfinderAdapter
 from core.models import Asset, Endpoint
+from recon.classifier import classify_endpoint
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 
@@ -45,7 +46,9 @@ def build_asset_map(
             continue
         for endpoint in adapter_cls().parse_file(path, run_id=run_id, target_id=target_id):
             decision = policy.validate_url(endpoint.url)
-            endpoints.append(replace(endpoint, in_scope=decision.allowed))
+            endpoints.append(
+                replace(endpoint, in_scope=decision.allowed, classification=classify_endpoint(endpoint))
+            )
 
     for asset in assets:
         store.insert_asset(asset)
@@ -53,8 +56,10 @@ def build_asset_map(
         store.insert_endpoint(endpoint)
 
     by_source: dict[str, int] = {}
+    by_classification: dict[str, int] = {}
     for endpoint in endpoints:
         by_source[endpoint.source] = by_source.get(endpoint.source, 0) + 1
+        by_classification[endpoint.classification] = by_classification.get(endpoint.classification, 0) + 1
 
     return {
         "run_id": run_id,
@@ -70,6 +75,7 @@ def build_asset_map(
             "in_scope": sum(1 for endpoint in endpoints if endpoint.in_scope),
             "out_of_scope": sum(1 for endpoint in endpoints if not endpoint.in_scope),
             "by_source": by_source,
+            "by_classification": by_classification,
             "items": [asdict(endpoint) for endpoint in endpoints],
         },
     }

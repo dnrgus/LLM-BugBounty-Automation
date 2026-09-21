@@ -7,6 +7,8 @@ from adapters.discovery.ffuf import FfufAdapter
 from adapters.discovery.katana import KatanaAdapter
 from adapters.recon.httpx import HttpxAdapter
 from adapters.recon.subfinder import SubfinderAdapter
+from core.models import Endpoint
+from recon.classifier import classify_endpoint
 from recon.pipeline import build_asset_map
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
@@ -49,6 +51,18 @@ def test_ffuf_adapter_parses_endpoints() -> None:
     assert endpoints[0].metadata["words"] == 40
 
 
+def _endpoint(url: str) -> Endpoint:
+    return Endpoint(run_id="run_1", target_id="target_1", url=url, method="GET", source="test")
+
+
+def test_classify_endpoint_matches_ai_shapes() -> None:
+    assert classify_endpoint(_endpoint("https://ai.example.com/api/chat")) == "chat"
+    assert classify_endpoint(_endpoint("https://ai.example.com/api/tools")) == "agent"
+    assert classify_endpoint(_endpoint("https://ai.example.com/api/rag/query")) == "rag"
+    assert classify_endpoint(_endpoint("https://ai.example.com/api/admin/health")) == "ai_api"
+    assert classify_endpoint(_endpoint("https://ai.example.com/status.html")) == "unknown"
+
+
 def test_policy_validate_domain_matches_deny_and_allow_lists() -> None:
     engine = PolicyEngine.from_yaml("config/scope.example.yaml")
     assert engine.validate_domain("ai.example.com").allowed
@@ -76,6 +90,7 @@ def test_build_asset_map_revalidates_scope(tmp_path: Path) -> None:
     assert result["endpoints"]["in_scope"] == 3
     assert result["endpoints"]["out_of_scope"] == 4
     assert result["endpoints"]["by_source"] == {"httpx": 3, "katana": 2, "ffuf": 2}
+    assert result["endpoints"]["by_classification"] == {"chat": 2, "ai_api": 4, "agent": 1}
 
     with store.connect() as conn:
         asset_rows = conn.execute("select domain, in_scope from assets").fetchall()

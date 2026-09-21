@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from pathlib import Path
 
 from core.models import CapabilityProfile, TraceEvent
+from rag_harness.corpus import ControlledDocument, chunk_documents, corpus_hash, load_corpus
+from rag_harness.retrieval import retrieve
 from targets.base import TargetMetadata, TargetResponse
+
+_DEFAULT_CORPUS_PATH = Path(__file__).resolve().parent.parent / "rag_harness" / "corpus.example.yaml"
 
 
 class _TraceBuffer:
@@ -127,8 +132,11 @@ class FakeAgentTarget:
 
 
 class FakeRAGTarget:
-    def __init__(self) -> None:
+    def __init__(self, corpus: list[ControlledDocument] | None = None) -> None:
         self._trace = _TraceBuffer()
+        self._documents = corpus if corpus is not None else load_corpus(_DEFAULT_CORPUS_PATH)
+        self._chunks = chunk_documents(self._documents)
+        self._corpus_hash = corpus_hash(self._documents)
 
     async def healthcheck(self) -> bool:
         return True
@@ -141,6 +149,7 @@ class FakeRAGTarget:
             name="fake-rag",
             version="offline",
             base_url="https://ai.example.com/api/rag",
+            extra={"rag_corpus_hash": self._corpus_hash},
         )
 
     async def capabilities(self) -> CapabilityProfile:
@@ -148,16 +157,35 @@ class FakeRAGTarget:
 
     async def send(self, prompt: str, session: str | None = None) -> TargetResponse:
         events = [self._trace.add(session, "llm_call", {"prompt_length": len(prompt)})]
-        events.append(
-            self._trace.add(
-                session,
-                "retrieval",
-                {"document_id": "doc_safe_1", "chunk_id": "chunk_1", "score": 0.92},
+        matches = retrieve(prompt, self._chunks, top_k=1)
+        top = matches[0] if matches else None
+        if top is not None:
+            events.append(
+                self._trace.add(
+                    session,
+                    "retrieval",
+                    {
+                        "document_id": top.chunk.document_id,
+                        "chunk_id": top.chunk.chunk_id,
+                        "score": top.score,
+                        "document_hash": top.chunk.document_hash,
+                        "source": top.chunk.source,
+                    },
+                )
             )
-        )
-        text = "RAG offline response grounded in controlled document."
+        if top is not None and top.chunk.injection:
+            text = f"Grounded response from {top.chunk.document_id}: {top.chunk.text.strip()}"
+        elif top is not None:
+            text = f"Grounded response referencing {top.chunk.document_id}."
+        else:
+            text = "No relevant controlled document found."
         events.append(self._trace.add(session, "final_response", {"length": len(text)}))
-        return TargetResponse(prompt=prompt, text=text, metadata={"session": session}, trace_events=events)
+        return TargetResponse(
+            prompt=prompt,
+            text=text,
+            metadata={"session": session, "retrieved_document": top.chunk.document_id if top else None},
+            trace_events=events,
+        )
 
     async def reset_session(self, session: str | None = None) -> None:
         self._trace.reset(session)

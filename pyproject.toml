@@ -29,6 +29,7 @@ packages = [
   "attacks",
   "core",
   "recon",
+  "rag_harness",
   "scope",
   "targets",
   "testcase",
