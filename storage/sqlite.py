@@ -16,6 +16,8 @@ from core.models import (
     RequestRecord,
     ResponseRecord,
     Run,
+    ExecutionCheckpoint,
+    SessionState,
     StoredTestcase,
     Target,
     Trace,
@@ -56,6 +58,24 @@ class SQLiteStore:
                   capabilities text not null,
                   metadata text not null,
                   created_at text not null
+                );
+                create table if not exists sessions (
+                  id text primary key,
+                  run_id text not null,
+                  target_id text not null,
+                  status text not null,
+                  created_at text not null
+                );
+                create table if not exists checkpoints (
+                  id text primary key,
+                  run_id text not null,
+                  trace_id text not null,
+                  testcase_id text not null,
+                  idempotency_key text not null unique,
+                  status text not null,
+                  attempts integer not null,
+                  error text,
+                  updated_at text not null
                 );
                 create table if not exists testcases (
                   id text primary key,
@@ -181,6 +201,37 @@ class SQLiteStore:
                 "insert into runs values (:id, :target_id, :policy_hash, :fingerprint, :created_at)",
                 asdict(run),
             )
+
+    def insert_session(self, session: SessionState) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "insert or replace into sessions values (:id, :run_id, :target_id, :status, :created_at)",
+                asdict(session),
+            )
+
+    def upsert_checkpoint(self, checkpoint: ExecutionCheckpoint) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into checkpoints values (
+                  :id, :run_id, :trace_id, :testcase_id, :idempotency_key,
+                  :status, :attempts, :error, :updated_at
+                )
+                on conflict(idempotency_key) do update set
+                  status = excluded.status,
+                  attempts = excluded.attempts,
+                  error = excluded.error,
+                  updated_at = excluded.updated_at
+                """,
+                asdict(checkpoint),
+            )
+
+    def get_checkpoint(self, idempotency_key: str) -> sqlite3.Row | None:
+        with self.connect() as conn:
+            return conn.execute(
+                "select * from checkpoints where idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
 
     def insert_testcase(self, testcase: StoredTestcase) -> None:
         data = asdict(testcase)

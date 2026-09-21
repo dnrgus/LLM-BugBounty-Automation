@@ -70,7 +70,7 @@ async def run_sample_pipeline(
     )
     store.insert_run(run)
 
-    executor = Executor(policy=policy, target=target, store=store)
+    executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
     judges = JudgeEnsemble.default()
     findings: list[Finding] = []
     reports: list[str] = []

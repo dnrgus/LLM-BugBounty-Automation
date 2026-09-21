@@ -15,6 +15,7 @@
 - SQLite 저장소와 Trace ordering 검증
 - OWASP GenAI, OWASP Agentic, MITRE ATLAS 기반 coverage matrix
 - 테스트케이스 schema validation, capability/policy 기반 selector, prompt rendering
+- Executor session/checkpoint, timeout, retry, idempotency key, trace export
 - deterministic judge, evidence redaction, 기본 Markdown report
 
 ## 빠른 시작

@@ -1,26 +1,83 @@
 from __future__ import annotations
 
-from core.models import Run, Trace, TraceEvent
+import asyncio
+import hashlib
+from dataclasses import dataclass
+
+from core.models import ExecutionCheckpoint, Run, Trace, TraceEvent
 from executor.approval import ApprovalGate
+from executor.session import SessionManager
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.base import TargetAdapter, TargetResponse
 from testcase.schema import Testcase
 
 
+@dataclass(frozen=True)
+class ExecutorOptions:
+    timeout_seconds: float = 10.0
+    max_attempts: int = 1
+    retry_backoff_seconds: float = 0.0
+
+
 class Executor:
-    def __init__(self, policy: PolicyEngine, target: TargetAdapter, store: SQLiteStore):
+    def __init__(
+        self,
+        policy: PolicyEngine,
+        target: TargetAdapter,
+        store: SQLiteStore,
+        options: ExecutorOptions | None = None,
+        target_id: str = "target",
+    ):
         self.policy = policy
         self.target = target
         self.store = store
         self.approval = ApprovalGate(policy)
+        self.options = options or ExecutorOptions()
+        self.sessions = SessionManager(target_id=target_id)
 
-    async def execute(self, run: Run, trace: Trace, testcase: Testcase, url: str) -> TargetResponse:
+    async def execute(
+        self,
+        run: Run,
+        trace: Trace,
+        testcase: Testcase,
+        url: str,
+        idempotency_key: str | None = None,
+    ) -> TargetResponse:
+        idempotency_key = idempotency_key or self._idempotency_key(run, trace, testcase)
+        previous = self.store.get_checkpoint(idempotency_key)
+        if previous is not None and previous["status"] == "completed":
+            self.store.insert_event(
+                TraceEvent(
+                    trace_id=trace.id,
+                    sequence=1,
+                    event_type="checkpoint_resume",
+                    metadata={"idempotency_key": idempotency_key, "status": "completed"},
+                )
+            )
+            return TargetResponse(
+                prompt=testcase.prompt,
+                text="Skipped completed idempotent execution.",
+                metadata={"idempotency_key": idempotency_key, "resumed": True},
+            )
+
+        session = self.sessions.create(run)
+        self.store.insert_session(session)
+        self.store.upsert_checkpoint(
+            ExecutionCheckpoint(
+                run_id=run.id,
+                trace_id=trace.id,
+                testcase_id=testcase.id,
+                idempotency_key=idempotency_key,
+                status="started",
+            )
+        )
+
         url_decision = self.policy.validate_url(url)
         self.store.insert_event(
             TraceEvent(
                 trace_id=trace.id,
-                sequence=1,
+                sequence=2,
                 event_type="scope_check",
                 metadata=url_decision.to_dict(),
             )
@@ -32,7 +89,7 @@ class Executor:
         self.store.insert_event(
             TraceEvent(
                 trace_id=trace.id,
-                sequence=2,
+                sequence=3,
                 event_type="policy_check",
                 metadata=category_decision.to_dict(),
             )
@@ -44,7 +101,7 @@ class Executor:
         self.store.insert_event(
             TraceEvent(
                 trace_id=trace.id,
-                sequence=3,
+                sequence=4,
                 event_type="budget_check",
                 metadata=budget_decision.to_dict(),
             )
@@ -52,7 +109,7 @@ class Executor:
         if not budget_decision.allowed:
             raise RuntimeError(budget_decision.reason)
 
-        decision, event = self.approval.evaluate(trace.id, 4, "network_get")
+        decision, event = self.approval.evaluate(trace.id, 5, "network_get")
         self.store.insert_event(event)
         if not decision.allowed:
             raise PermissionError(decision.reason)
@@ -60,13 +117,13 @@ class Executor:
         self.store.insert_event(
             TraceEvent(
                 trace_id=trace.id,
-                sequence=5,
+                sequence=6,
                 event_type="llm_call",
-                metadata={"testcase_id": testcase.id},
+                metadata={"testcase_id": testcase.id, "idempotency_key": idempotency_key},
             )
         )
-        response = await self.target.send(testcase.prompt, session=trace.id)
-        for offset, target_event in enumerate(response.trace_events, start=6):
+        response = await self._send_with_retries(run, trace, testcase, idempotency_key)
+        for offset, target_event in enumerate(response.trace_events, start=7):
             self.store.insert_event(
                 TraceEvent(
                     trace_id=trace.id,
@@ -79,9 +136,64 @@ class Executor:
         self.store.insert_event(
             TraceEvent(
                 trace_id=trace.id,
-                sequence=6 + len(response.trace_events),
+                sequence=7 + len(response.trace_events),
                 event_type="final_response",
                 metadata={"length": len(response.text)},
             )
         )
+        self.store.upsert_checkpoint(
+            ExecutionCheckpoint(
+                run_id=run.id,
+                trace_id=trace.id,
+                testcase_id=testcase.id,
+                idempotency_key=idempotency_key,
+                status="completed",
+                attempts=self.options.max_attempts,
+            )
+        )
         return response
+
+    async def _send_with_retries(
+        self,
+        run: Run,
+        trace: Trace,
+        testcase: Testcase,
+        idempotency_key: str,
+    ) -> TargetResponse:
+        last_error: Exception | None = None
+        for attempt in range(1, self.options.max_attempts + 1):
+            self.store.insert_event(
+                TraceEvent(
+                    trace_id=trace.id,
+                    sequence=100 + attempt,
+                    event_type="attempt",
+                    metadata={"attempt": attempt, "max_attempts": self.options.max_attempts},
+                )
+            )
+            try:
+                return await asyncio.wait_for(
+                    self.target.send(testcase.prompt, session=self.sessions.session_for_trace(trace)),
+                    timeout=self.options.timeout_seconds,
+                )
+            except Exception as exc:
+                last_error = exc
+                self.store.upsert_checkpoint(
+                    ExecutionCheckpoint(
+                        run_id=run.id,
+                        trace_id=trace.id,
+                        testcase_id=testcase.id,
+                        idempotency_key=idempotency_key,
+                        status="retrying" if attempt < self.options.max_attempts else "failed",
+                        attempts=attempt,
+                        error=str(exc),
+                    )
+                )
+                if attempt < self.options.max_attempts and self.options.retry_backoff_seconds:
+                    await asyncio.sleep(self.options.retry_backoff_seconds)
+        assert last_error is not None
+        raise last_error
+
+    @staticmethod
+    def _idempotency_key(run: Run, trace: Trace, testcase: Testcase) -> str:
+        payload = f"{run.id}:{trace.id}:{testcase.id}:{testcase.content_hash}"
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()

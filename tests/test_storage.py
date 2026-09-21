@@ -62,6 +62,7 @@ def test_storage_crud_and_trace_ordering(tmp_path: Path) -> None:
 
     with store.connect() as conn:
         assert conn.execute("select count(*) from targets").fetchone()[0] == 1
+        assert conn.execute("select count(*) from sessions").fetchone()[0] == 0
         assert conn.execute("select count(*) from testcases").fetchone()[0] == 1
         assert conn.execute("select count(*) from requests").fetchone()[0] == 1
         assert conn.execute("select count(*) from responses").fetchone()[0] == 1
@@ -78,4 +79,3 @@ def test_reproduction_success_rate() -> None:
         status=FindingStatus.CONFIRMED,
     )
     assert repro.success_rate == 0.6
-
