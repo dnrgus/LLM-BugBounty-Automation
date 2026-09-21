@@ -3,7 +3,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.fingerprint import build_environment_fingerprint
-from core.models import Finding, FindingStatus, Judgement, Run, Trace
+from core.models import (
+    Finding,
+    FindingStatus,
+    PromptRecord,
+    RequestRecord,
+    ResponseRecord,
+    Run,
+    StoredTestcase,
+    Target,
+    Trace,
+)
 from executor.runner import Executor
 from judges.ensemble import JudgeEnsemble
 from reporting.reporter import write_markdown_report
@@ -44,6 +54,15 @@ async def run_sample_pipeline(
         fingerprint=fingerprint["fingerprint"],
     )
     store.initialize()
+    store.insert_target(
+        Target(
+            id="fake-llm",
+            kind="llm",
+            base_url="https://ai.example.com/api/chat",
+            capabilities=capabilities.to_dict(),
+            metadata=await target.metadata(),
+        )
+    )
     store.insert_run(run)
 
     executor = Executor(policy=policy, target=target, store=store)
@@ -52,13 +71,41 @@ async def run_sample_pipeline(
     reports: list[str] = []
 
     for case in selected:
+        store.insert_testcase(
+            StoredTestcase(
+                id=case.id,
+                name=case.name,
+                category=case.category,
+                content_hash=case.content_hash,
+                frameworks=case.frameworks,
+            )
+        )
+        prompt = PromptRecord(testcase_id=case.id, prompt_hash=case.content_hash, text=case.prompt)
+        store.insert_prompt(prompt)
         trace = Trace(run_id=run.id, testcase_id=case.id)
         store.insert_trace(trace)
+        request = RequestRecord(
+            run_id=run.id,
+            trace_id=trace.id,
+            testcase_id=case.id,
+            prompt_hash=case.content_hash,
+            metadata={"target_id": "fake-llm"},
+        )
+        store.insert_request(request)
         response = await executor.execute(
             run=run,
             trace=trace,
             testcase=case,
             url="https://ai.example.com/api/chat",
+        )
+        store.insert_response(
+            ResponseRecord(
+                request_id=request.id,
+                trace_id=trace.id,
+                status_code=200,
+                token_count=len(response.text.split()),
+                metadata=response.metadata,
+            )
         )
         judgement = judges.judge(run.id, case, response.text)
         store.insert_judgement(judgement)
@@ -93,4 +140,3 @@ async def run_sample_pipeline(
         "reports": reports,
         "fingerprint": run.fingerprint,
     }
-

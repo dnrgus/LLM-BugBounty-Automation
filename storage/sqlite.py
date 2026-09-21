@@ -1,11 +1,31 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import asdict
 from pathlib import Path
 
-from core.models import Evidence, Finding, Judgement, Run, Trace, TraceEvent
+from core.models import (
+    Evidence,
+    Finding,
+    Judgement,
+    MutationRecord,
+    PromptRecord,
+    ReportRecord,
+    Reproduction,
+    RequestRecord,
+    ResponseRecord,
+    Run,
+    StoredTestcase,
+    Target,
+    Trace,
+    TraceEvent,
+)
 from storage.artifacts import sha256_file
+
+
+def _json(data: object) -> str:
+    return json.dumps(data, sort_keys=True, default=str)
 
 
 class SQLiteStore:
@@ -29,6 +49,37 @@ class SQLiteStore:
                   fingerprint text not null,
                   created_at text not null
                 );
+                create table if not exists targets (
+                  id text primary key,
+                  kind text not null,
+                  base_url text not null,
+                  capabilities text not null,
+                  metadata text not null,
+                  created_at text not null
+                );
+                create table if not exists testcases (
+                  id text primary key,
+                  name text not null,
+                  category text not null,
+                  content_hash text not null,
+                  frameworks text not null,
+                  version text not null
+                );
+                create table if not exists prompts (
+                  id text primary key,
+                  testcase_id text not null,
+                  prompt_hash text not null,
+                  text text not null,
+                  mutation_id text
+                );
+                create table if not exists mutations (
+                  id text primary key,
+                  testcase_id text not null,
+                  strategy text not null,
+                  prompt_hash text not null,
+                  parent_mutation_id text,
+                  generation integer not null
+                );
                 create table if not exists traces (
                   id text primary key,
                   run_id text not null,
@@ -43,6 +94,30 @@ class SQLiteStore:
                   timestamp text not null,
                   artifact_ref text,
                   metadata text not null
+                );
+                create table if not exists requests (
+                  id text primary key,
+                  run_id text not null,
+                  trace_id text not null,
+                  testcase_id text not null,
+                  prompt_hash text not null,
+                  artifact_ref text,
+                  latency_ms integer,
+                  token_count integer,
+                  cost_usd real,
+                  metadata text not null,
+                  created_at text not null
+                );
+                create table if not exists responses (
+                  id text primary key,
+                  request_id text not null,
+                  trace_id text not null,
+                  status_code integer not null,
+                  artifact_ref text,
+                  latency_ms integer,
+                  token_count integer,
+                  metadata text not null,
+                  created_at text not null
                 );
                 create table if not exists judgements (
                   id text primary key,
@@ -73,12 +148,31 @@ class SQLiteStore:
                   sha256 text not null,
                   sanitized integer not null
                 );
+                create table if not exists reproductions (
+                  id text primary key,
+                  finding_id text not null,
+                  attempts integer not null,
+                  successes integer not null,
+                  control_passed integer not null,
+                  status text not null
+                );
                 create table if not exists reports (
-                  id integer primary key autoincrement,
+                  id text primary key,
                   run_id text not null,
-                  path text not null
+                  path text not null,
+                  kind text not null
                 );
                 """
+            )
+
+    def insert_target(self, target: Target) -> None:
+        data = asdict(target)
+        data["capabilities"] = _json(data["capabilities"])
+        data["metadata"] = _json(data["metadata"])
+        with self.connect() as conn:
+            conn.execute(
+                "insert or replace into targets values (:id, :kind, :base_url, :capabilities, :metadata, :created_at)",
+                data,
             )
 
     def insert_run(self, run: Run) -> None:
@@ -88,16 +182,76 @@ class SQLiteStore:
                 asdict(run),
             )
 
+    def insert_testcase(self, testcase: StoredTestcase) -> None:
+        data = asdict(testcase)
+        data["frameworks"] = _json(data["frameworks"])
+        with self.connect() as conn:
+            conn.execute(
+                "insert or replace into testcases values (:id, :name, :category, :content_hash, :frameworks, :version)",
+                data,
+            )
+
+    def insert_prompt(self, prompt: PromptRecord) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "insert into prompts values (:id, :testcase_id, :prompt_hash, :text, :mutation_id)",
+                asdict(prompt),
+            )
+
+    def insert_mutation(self, mutation: MutationRecord) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "insert into mutations values (:id, :testcase_id, :strategy, :prompt_hash, :parent_mutation_id, :generation)",
+                asdict(mutation),
+            )
+
     def insert_trace(self, trace: Trace) -> None:
         with self.connect() as conn:
             conn.execute("insert into traces values (:id, :run_id, :testcase_id, :created_at)", asdict(trace))
 
     def insert_event(self, event: TraceEvent) -> None:
         data = asdict(event)
-        data["metadata"] = __import__("json").dumps(data["metadata"], sort_keys=True)
+        data["metadata"] = _json(data["metadata"])
         with self.connect() as conn:
             conn.execute(
                 "insert into events values (:id, :trace_id, :sequence, :event_type, :timestamp, :artifact_ref, :metadata)",
+                data,
+            )
+
+    def list_events(self, trace_id: str) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "select * from events where trace_id = ? order by sequence asc",
+                (trace_id,),
+            ).fetchall()
+        return list(rows)
+
+    def insert_request(self, request: RequestRecord) -> None:
+        data = asdict(request)
+        data["metadata"] = _json(data["metadata"])
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into requests values (
+                  :id, :run_id, :trace_id, :testcase_id, :prompt_hash,
+                  :artifact_ref, :latency_ms, :token_count, :cost_usd,
+                  :metadata, :created_at
+                )
+                """,
+                data,
+            )
+
+    def insert_response(self, response: ResponseRecord) -> None:
+        data = asdict(response)
+        data["metadata"] = _json(data["metadata"])
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into responses values (
+                  :id, :request_id, :trace_id, :status_code, :artifact_ref,
+                  :latency_ms, :token_count, :metadata, :created_at
+                )
+                """,
                 data,
             )
 
@@ -119,6 +273,16 @@ class SQLiteStore:
                 data,
             )
 
+    def insert_reproduction(self, reproduction: Reproduction) -> None:
+        data = asdict(reproduction)
+        data["control_passed"] = int(reproduction.control_passed)
+        data["status"] = reproduction.status.value
+        with self.connect() as conn:
+            conn.execute(
+                "insert into reproductions values (:id, :finding_id, :attempts, :successes, :control_passed, :status)",
+                data,
+            )
+
     def record_evidence(self, run_id: str, kind: str, path: Path) -> Evidence:
         evidence = Evidence(run_id=run_id, kind=kind, path=str(path), sha256=sha256_file(path), sanitized=True)
         with self.connect() as conn:
@@ -129,6 +293,10 @@ class SQLiteStore:
         return evidence
 
     def record_report(self, run_id: str, path: Path) -> None:
+        report = ReportRecord(run_id=run_id, path=str(path))
         with self.connect() as conn:
-            conn.execute("insert into reports(run_id, path) values (?, ?)", (run_id, str(path)))
-
+            columns = {row["name"] for row in conn.execute("pragma table_info(reports)").fetchall()}
+            if "kind" not in columns:
+                conn.execute("insert into reports(run_id, path) values (?, ?)", (run_id, str(path)))
+                return
+            conn.execute("insert into reports values (:id, :run_id, :path, :kind)", asdict(report))

@@ -23,6 +23,16 @@ class FindingStatus(str, Enum):
 
 
 @dataclass(frozen=True)
+class Target:
+    kind: str
+    base_url: str
+    capabilities: dict[str, Any]
+    metadata: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=lambda: new_id("target"))
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class CapabilityProfile:
     chat: bool = True
     system_prompt_control: bool = False
@@ -50,6 +60,35 @@ class Run:
 
 
 @dataclass(frozen=True)
+class StoredTestcase:
+    id: str
+    name: str
+    category: str
+    content_hash: str
+    frameworks: dict[str, list[str]] = field(default_factory=dict)
+    version: str = "local"
+
+
+@dataclass(frozen=True)
+class PromptRecord:
+    testcase_id: str
+    prompt_hash: str
+    text: str
+    mutation_id: str | None = None
+    id: str = field(default_factory=lambda: new_id("prompt"))
+
+
+@dataclass(frozen=True)
+class MutationRecord:
+    testcase_id: str
+    strategy: str
+    prompt_hash: str
+    parent_mutation_id: str | None = None
+    generation: int = 0
+    id: str = field(default_factory=lambda: new_id("mutation"))
+
+
+@dataclass(frozen=True)
 class TraceEvent:
     trace_id: str
     sequence: int
@@ -65,6 +104,34 @@ class Trace:
     run_id: str
     testcase_id: str
     id: str = field(default_factory=lambda: new_id("trace"))
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class RequestRecord:
+    run_id: str
+    trace_id: str
+    testcase_id: str
+    prompt_hash: str
+    artifact_ref: str | None = None
+    latency_ms: int | None = None
+    token_count: int | None = None
+    cost_usd: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=lambda: new_id("request"))
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class ResponseRecord:
+    request_id: str
+    trace_id: str
+    status_code: int
+    artifact_ref: str | None = None
+    latency_ms: int | None = None
+    token_count: int | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=lambda: new_id("response"))
     created_at: str = field(default_factory=utc_now)
 
 
@@ -102,3 +169,26 @@ class Evidence:
     sanitized: bool
     id: str = field(default_factory=lambda: new_id("evidence"))
 
+
+@dataclass(frozen=True)
+class Reproduction:
+    finding_id: str
+    attempts: int
+    successes: int
+    control_passed: bool
+    status: FindingStatus
+    id: str = field(default_factory=lambda: new_id("repro"))
+
+    @property
+    def success_rate(self) -> float:
+        if self.attempts == 0:
+            return 0.0
+        return self.successes / self.attempts
+
+
+@dataclass(frozen=True)
+class ReportRecord:
+    run_id: str
+    path: str
+    kind: str = "shareable"
+    id: str = field(default_factory=lambda: new_id("report"))

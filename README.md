@@ -1,23 +1,20 @@
 # LLM-BugBounty-Automation
 
-Automated pipeline for authorized LLM security testing, red teaming,
-vulnerability validation, reproduction, evidence collection, and bug bounty
-reporting.
+허가된 LLM, RAG, AI Agent, 웹 기반 AI 서비스를 반복 가능하고 증거 중심으로 점검하기 위한 보안 테스트 자동화 프로젝트입니다.
 
-This repository is intentionally scope-first and policy-aware. It is designed
-for authorized testing only. The current implementation provides the first
-working vertical slice:
+이 저장소의 기본 원칙은 **Scope first**, **Policy aware**, **Evidence driven**, **Reproducible**입니다. 허가되지 않은 대상이나 프로그램 정책에서 금지한 행위는 실행 전에 차단하는 것을 목표로 합니다.
 
-- CLI entry points for `doctor`, `fingerprint`, `validate-scope`, and
-  `sample-run`
-- Scope and program policy enforcement before any target action
-- Capability-aware YAML testcase loading
-- Fake LLM target for offline integration tests
-- Trace events, deterministic judges, evidence redaction, and basic reports
-- SQLite storage primitives for runs, traces, events, judgements, findings,
-  evidence, and reports
+현재 구현된 범위:
 
-## Quick Start
+- `doctor`, `fingerprint`, `validate-scope`, `sample-run` CLI
+- Scope + Program Policy 실행 게이트
+- Capability 기반 YAML 테스트케이스 로딩
+- 외부 서비스 없이 테스트 가능한 Fake LLM Target
+- Run, Target, Testcase, Prompt, Request, Response, Trace/Event, Judgement, Finding, Evidence, Reproduction, Report 저장 모델
+- SQLite 저장소와 Trace ordering 검증
+- deterministic judge, evidence redaction, 기본 Markdown report
+
+## 빠른 시작
 
 ```bash
 python -m pip install -e ".[dev]"
@@ -27,42 +24,58 @@ python main.py sample-run
 pytest
 ```
 
-`sample-run` uses only the bundled fake target. It does not contact external
-services.
+`sample-run`은 번들된 Fake LLM Target만 사용합니다. 외부 네트워크나 실제 LLM API를 호출하지 않습니다.
 
-## Repository Layout
+## 저장소 구조
 
 ```text
-config/        default pipeline, model, tool, logging, and scope examples
-core/          orchestrator, models, events, and fingerprints
-scope/         scope and program policy enforcement
-targets/       target adapter contract and fake targets
-testcase/      YAML testcase schema, loader, selector, and seed suite
-executor/      session runner and approval gate
-traces/        trace export helpers
-judges/        rule, canary, regex, and ensemble judges
-storage/       SQLite and artifact helpers
-reporting/     evidence redaction and report generation
-tests/         unit and integration tests
+config/        파이프라인, 모델, 도구, 로깅, Scope 예시
+core/          orchestrator, 데이터 모델, fingerprint
+scope/         Scope와 Program Policy 검사
+targets/       Target Adapter 계약과 Fake Target
+testcase/      YAML 테스트케이스 스키마, 로더, 기본 suite
+executor/      세션 실행기와 Approval Gate
+traces/        Trace export helper
+judges/        rule, canary, regex, ensemble judge
+storage/       SQLite 저장소와 artifact helper
+reporting/     Evidence redaction과 report 생성
+tests/         단위 및 통합 테스트
 ```
 
-## Safety Model
+## 안전 모델
 
-Every execution must pass both:
+모든 실행은 다음 두 단계를 통과해야 합니다.
 
-1. Scope validation: domain and URL pattern checks.
-2. Program policy validation: allowed testing types, rate/concurrency/request
-   budget, and high-risk action decisions.
+1. Scope validation: domain과 URL pattern 검사
+2. Program Policy validation: 허용된 테스트 유형, request budget, concurrency, 고위험 action 정책 검사
 
-High-risk actions are blocked or simulated by default. Raw evidence, local run
-artifacts, private reports, credentials, and environment files are gitignored.
+고위험 action은 기본적으로 block 또는 simulate 처리합니다. Raw evidence, 로컬 실행 산출물, private report, credential, `.env` 파일은 커밋되지 않도록 `.gitignore`에 포함되어 있습니다.
 
-## Milestones
+## 현재 명령
 
-The design document defines these executable milestones:
+```bash
+# 로컬 런타임과 선택 도구 설치 상태 확인
+python main.py doctor
 
-- `v0.1.0-mvp1`: core validation loop, evidence, and basic reporting
-- `v0.2.0-llm-redteam`: Promptfoo/Garak/Mutation/PyRIT integration
-- `v0.3.0-discovery`: recon, web security tools, AI discovery, and RAG harness
-- `v1.0.0`: stable first release
+# URL이 Scope/Policy를 통과하는지 확인
+python main.py validate-scope --url https://ai.example.com/api/chat
 
+# 오프라인 Fake Target 기반 샘플 실행
+python main.py sample-run
+
+# 재현성 fingerprint 생성
+python main.py fingerprint
+```
+
+## 마일스톤
+
+설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
+
+- `v0.1.0-mvp1`: core validation loop, evidence, basic reporting
+- `v0.2.0-llm-redteam`: Promptfoo/Garak/Mutation/PyRIT 통합
+- `v0.3.0-discovery`: recon, web security tools, AI discovery, RAG harness 통합
+- `v1.0.0`: 안정화된 첫 릴리스
+
+## 개발 흐름
+
+각 Phase는 테스트가 통과하고 샘플 실행이 가능한 상태에서 커밋합니다. 실행 가능한 마일스톤에만 tag를 생성합니다.
