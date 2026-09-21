@@ -22,8 +22,11 @@ py-modules = ["cli", "main"]
 packages = [
   "adapters",
   "adapters.llm",
+  "adapters.recon",
+  "adapters.discovery",
   "attacks",
   "core",
+  "recon",
   "scope",
   "targets",
   "testcase",

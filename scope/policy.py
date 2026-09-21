@@ -81,6 +81,17 @@ class PolicyEngine:
             return PolicyDecision(False, "automated scanning is disabled")
         return PolicyDecision(True, "in scope", metadata={"url": url, "hostname": hostname})
 
+    def validate_domain(self, hostname: str) -> PolicyDecision:
+        scope = self.config.get("scope", {})
+        denied_domains = scope.get("deny_domains", [])
+        if self._domain_matches(hostname, denied_domains, allow_subdomains=True):
+            return PolicyDecision(False, "domain explicitly denied", metadata={"hostname": hostname})
+        domains = scope.get("domains", [])
+        allow_subdomains = bool(scope.get("allow_subdomains", False))
+        if not self._domain_matches(hostname, domains, allow_subdomains=allow_subdomains):
+            return PolicyDecision(False, "domain out of scope", metadata={"hostname": hostname})
+        return PolicyDecision(True, "domain in scope", metadata={"hostname": hostname})
+
     def validate_redirect(self, source_url: str, redirect_url: str) -> PolicyDecision:
         decision = self.validate_url(redirect_url)
         if decision.allowed:

@@ -14,6 +14,7 @@ from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import run_adaptive_pipeline, run_sample_pipeline
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
+from recon.pipeline import build_asset_map
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
@@ -163,6 +164,23 @@ def cmd_adaptive_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_recon(args: argparse.Namespace) -> int:
+    policy = PolicyEngine.from_yaml(args.scope)
+    store = SQLiteStore(args.db)
+    result = build_asset_map(
+        policy,
+        store,
+        run_id=args.run_id,
+        target_id=args.target_id,
+        subfinder_input=args.subfinder_input,
+        httpx_input=args.httpx_input,
+        katana_input=args.katana_input,
+        ffuf_input=args.ffuf_input,
+    )
+    print(_json(result))
+    return 0
+
+
 def _adapter_for_tool(tool: str):
     if tool == "promptfoo":
         return PromptfooAdapter()
@@ -251,6 +269,20 @@ def build_parser() -> argparse.ArgumentParser:
     adaptive_run.add_argument("--db", type=Path, default=Path("runs/adaptive.sqlite"))
     adaptive_run.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
     adaptive_run.set_defaults(func=cmd_adaptive_run)
+
+    recon = sub.add_parser(
+        "recon",
+        help="Build a scope-revalidated asset map from Subfinder/httpx/Katana/ffuf output",
+    )
+    recon.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    recon.add_argument("--run-id", default="run_fixture")
+    recon.add_argument("--target-id", default="target_fixture")
+    recon.add_argument("--db", type=Path, default=Path("runs/recon.sqlite"))
+    recon.add_argument("--subfinder-input", type=Path)
+    recon.add_argument("--httpx-input", type=Path)
+    recon.add_argument("--katana-input", type=Path)
+    recon.add_argument("--ffuf-input", type=Path)
+    recon.set_defaults(func=cmd_recon)
 
     return parser
 
