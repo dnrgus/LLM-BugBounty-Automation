@@ -60,6 +60,28 @@ class Run:
 
 
 @dataclass(frozen=True)
+class SessionState:
+    run_id: str
+    target_id: str
+    status: str = "active"
+    id: str = field(default_factory=lambda: new_id("session"))
+    created_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
+class ExecutionCheckpoint:
+    run_id: str
+    trace_id: str
+    testcase_id: str
+    idempotency_key: str
+    status: str
+    attempts: int = 0
+    error: str | None = None
+    id: str = field(default_factory=lambda: new_id("checkpoint"))
+    updated_at: str = field(default_factory=utc_now)
+
+
+@dataclass(frozen=True)
 class StoredTestcase:
     id: str
     name: str

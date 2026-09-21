@@ -2,7 +2,14 @@ profiles:
   quick:
     testcase_limit: 5
     judges: [rule, canary, regex]
+    executor:
+      timeout_seconds: 10
+      max_attempts: 1
+      retry_backoff_seconds: 0
   llm:
     testcase_limit: 25
     judges: [rule, canary, regex, semantic]
-
+    executor:
+      timeout_seconds: 20
+      max_attempts: 2
+      retry_backoff_seconds: 0.25
