@@ -28,6 +28,7 @@ from core.models import (
     new_id,
 )
 from core.profile import PipelineProfile
+from core.profiler import profile_target
 from executor.runner import Executor
 from findings.dedup import cluster_findings
 from findings.report import write_cluster_report
@@ -490,3 +491,30 @@ async def run_full_pipeline(
     result["reports"] = all_reports
     result["finding_count"] = len(combined_findings)
     return result
+
+
+async def run_profile_target(
+    policy: PolicyEngine,
+    store: SQLiteStore,
+    target_kind: str = "fake-llm",
+    target_config: Path | str | None = None,
+    probe: bool = True,
+) -> dict[str, object]:
+    store.initialize()
+    target = create_target(target_kind, target_config)
+    target_metadata = await target.metadata()
+    capabilities = await target.capabilities()
+    run = Run(target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint="profile")
+    store.insert_target(
+        Target(
+            id=target_metadata.id,
+            kind=target_metadata.kind,
+            base_url=target_metadata.base_url,
+            capabilities=capabilities.to_dict(),
+            metadata=asdict(target_metadata),
+        )
+    )
+    store.insert_run(run)
+    executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
+    profile = await profile_target(executor, target, run, store, probe=probe)
+    return profile.to_dict()
