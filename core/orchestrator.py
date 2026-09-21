@@ -19,6 +19,8 @@ from core.models import (
     Trace,
 )
 from executor.runner import Executor
+from findings.dedup import cluster_findings
+from findings.report import write_cluster_report
 from judges.ensemble import JudgeEnsemble
 from reporting.evidence import write_evidence_bundle
 from reporting.reporter import write_json_report, write_markdown_report
@@ -99,6 +101,8 @@ async def run_sample_pipeline(
             reproduction_summary=reproduction_summary,
         )
 
+    clusters = _cluster_and_report(run, findings, reports)
+
     return {
         "run_id": run.id,
         "selected_testcases": [case.id for case in selected],
@@ -110,7 +114,17 @@ async def run_sample_pipeline(
             build_coverage_matrix(testcases, capabilities, {case.id for case in selected})
         ),
         "reproductions": reproduction_summary,
+        "clusters": clusters,
     }
+
+
+def _cluster_and_report(run: Run, findings: list[Finding], reports: list[str]) -> list[dict[str, object]]:
+    if not findings:
+        return []
+    clusters = cluster_findings(findings)
+    report_path = write_cluster_report(Path("reports/shareable"), run, clusters)
+    reports.append(str(report_path))
+    return [cluster.to_dict() for cluster in clusters]
 
 
 async def _process_case(
@@ -303,6 +317,8 @@ async def run_adaptive_pipeline(
                 mutation_id=mutation.id,
             )
 
+    clusters = _cluster_and_report(run, findings, reports)
+
     return {
         "run_id": run.id,
         "target": target_metadata.id,
@@ -312,4 +328,5 @@ async def run_adaptive_pipeline(
         "reports": reports,
         "fingerprint": run.fingerprint,
         "reproductions": reproduction_summary,
+        "clusters": clusters,
     }

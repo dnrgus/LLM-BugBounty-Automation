@@ -26,6 +26,7 @@
 - Nuclei/Dalfox 결과를 NormalizedResult(FindingCandidate)로, TruffleHog 결과를 SecretFinding으로 정규화 (원본 secret 값은 절대 저장/출력하지 않고 도구가 제공한 redacted 값만 사용)
 - Recon Endpoint를 AI API/Chat/RAG/Agent로 분류하는 offline 휴리스틱 Classifier
 - RAG Test Harness: controlled/injection 문서 corpus, chunking, deterministic retrieval, retrieval trace, RAG corpus hash를 Environment Fingerprint에 포함
+- Finding Dedup/Root Cause Clustering: category+seed testcase 기반 exact dedup과 제목 유사도 기반 heuristic dedup, root_cause_key는 run 간에도 안정적이라 동일 원인 재발을 연결 가능. `sample-run`/`adaptive-run`이 root cause cluster report를 자동 생성
 
 ## 빠른 시작
 
@@ -53,6 +54,7 @@ adapters/      LLM/Recon/Discovery 외부 도구 어댑터
 attacks/       Mutation Engine과 PyRIT Adaptive Planner
 recon/         Subfinder/httpx/Katana/ffuf 기반 Asset/Endpoint 파이프라인, AI Endpoint Classifier
 rag_harness/   Controlled RAG corpus, chunking, retrieval harness
+findings/      Finding dedup, root-cause clustering, cluster report
 testcase/      YAML 테스트케이스 스키마, 로더, 기본 suite
 executor/      세션 실행기와 Approval Gate
 traces/        Trace export helper
@@ -136,7 +138,7 @@ python main.py sample-run --target fake-rag
 
 - `evidence/raw/`: 원본 요청/응답 Evidence
 - `evidence/sanitized/`: redaction 적용 Evidence와 redaction log
-- `reports/shareable/`: 제출용 Markdown/JSON report
+- `reports/shareable/`: 제출용 Markdown/JSON report, `{run_id}_root_cause_clusters.json` (findings가 있을 때만 생성)
 
 위 경로는 기본적으로 `.gitignore` 대상입니다.
 
