@@ -65,7 +65,7 @@ def cmd_sample_run(args: argparse.Namespace) -> int:
     testcases = load_testcases(args.testcases)
     engine = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
-    result = asyncio.run(run_sample_pipeline(engine, testcases, store))
+    result = asyncio.run(run_sample_pipeline(engine, testcases, store, target_kind=args.target))
     print(_json(result))
     return 0
 
@@ -93,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     sample.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     sample.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
+    sample.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
     sample.set_defaults(func=cmd_sample_run)
 
     return parser
@@ -102,4 +103,3 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
-
