@@ -38,4 +38,4 @@ tools:
   trufflehog:
     enabled: true
     category: secret_scanner
-    output: json
+    output: jsonl

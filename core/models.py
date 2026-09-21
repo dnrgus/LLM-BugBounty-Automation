@@ -196,6 +196,24 @@ class Judgement:
 
 
 @dataclass(frozen=True)
+class SecretFinding:
+    run_id: str
+    target_id: str
+    detector: str
+    source: str
+    location: str
+    verified: bool
+    redacted_secret: str
+    raw_artifact_ref: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    id: str = field(default_factory=lambda: new_id("secret"))
+    created_at: str = field(default_factory=utc_now)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Finding:
     run_id: str
     testcase_id: str

@@ -1,0 +1,22 @@
+[
+  {
+    "type": "V",
+    "method": "GET",
+    "data": "https://ai.example.com/search?q=FUZZ",
+    "param": "q",
+    "payload": "<script>alert(1)</script>",
+    "evidence": "reflected in response body",
+    "cwe": "CWE-79",
+    "severity": "medium"
+  },
+  {
+    "type": "G",
+    "method": "GET",
+    "data": "https://ai.example.com/search?q=FUZZ",
+    "param": "q",
+    "payload": "",
+    "evidence": "",
+    "cwe": "",
+    "severity": "info"
+  }
+]
