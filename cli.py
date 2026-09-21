@@ -14,7 +14,7 @@ from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
-from core.orchestrator import run_adaptive_pipeline, run_full_pipeline, run_sample_pipeline
+from core.orchestrator import run_adaptive_pipeline, run_full_pipeline, run_profile_target, run_sample_pipeline
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
@@ -174,6 +174,22 @@ def cmd_adaptive_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_profile(args: argparse.Namespace) -> int:
+    policy = PolicyEngine.from_yaml(args.scope)
+    store = SQLiteStore(args.db)
+    result = asyncio.run(
+        run_profile_target(
+            policy,
+            store,
+            target_kind=args.target,
+            target_config=args.target_config,
+            probe=not args.no_probe,
+        )
+    )
+    print(_json(result))
+    return 0
+
+
 def cmd_recon(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
@@ -279,6 +295,21 @@ def build_parser() -> argparse.ArgumentParser:
     coverage.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     coverage.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
     coverage.set_defaults(func=cmd_coverage)
+
+    profile_cmd = sub.add_parser(
+        "profile",
+        help="Probe a target's capabilities (declared config + observed multi-turn behavior)",
+    )
+    profile_cmd.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    profile_cmd.add_argument("--db", type=Path, default=Path("runs/profile.sqlite"))
+    profile_cmd.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
+    profile_cmd.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
+    profile_cmd.add_argument(
+        "--no-probe",
+        action="store_true",
+        help="Skip active probing; report only the target's declared capabilities",
+    )
+    profile_cmd.set_defaults(func=cmd_profile)
 
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
     judge_benchmark.add_argument("--benchmark", type=Path, default=DEFAULT_JUDGE_BENCHMARK)

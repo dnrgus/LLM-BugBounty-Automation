@@ -135,6 +135,51 @@ def test_executor_skips_completed_idempotency_key(tmp_path: Path) -> None:
     assert target.calls == 1
 
 
+def test_executor_defaults_session_to_trace_id_when_not_overridden(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "session_default.sqlite")
+    run, trace = _run_and_trace(store)
+    target = FlakyTarget(fail_count=0)
+    executor = Executor(
+        policy=PolicyEngine.from_yaml("config/scope.example.yaml"),
+        target=target,
+        store=store,
+        options=ExecutorOptions(max_attempts=1),
+        target_id="flaky",
+    )
+    response = asyncio.run(executor.execute(run, trace, _case(), "https://ai.example.com/api/chat"))
+    assert response.metadata["session"] == trace.id
+
+
+def test_executor_session_id_override_lets_two_traces_share_one_target_session(tmp_path: Path) -> None:
+    # profile_target() needs this: two Executor.execute() calls (each with its
+    # own Trace, for clean event bookkeeping) must still land in the same
+    # target-side session so a multi-turn probe actually threads state.
+    store = SQLiteStore(tmp_path / "session_override.sqlite")
+    run, trace_a = _run_and_trace(store)
+    trace_b = Trace(run_id=run.id, testcase_id="LLM-TEST-001")
+    store.insert_trace(trace_b)
+    target = FlakyTarget(fail_count=0)
+    executor = Executor(
+        policy=PolicyEngine.from_yaml("config/scope.example.yaml"),
+        target=target,
+        store=store,
+        options=ExecutorOptions(max_attempts=1),
+        target_id="flaky",
+    )
+    case = _case()
+
+    first = asyncio.run(
+        executor.execute(run, trace_a, case, "https://ai.example.com/api/chat", session_id="shared-session")
+    )
+    second = asyncio.run(
+        executor.execute(run, trace_b, case, "https://ai.example.com/api/chat", session_id="shared-session")
+    )
+
+    assert first.metadata["session"] == "shared-session"
+    assert second.metadata["session"] == "shared-session"
+    assert trace_a.id != trace_b.id
+
+
 def test_trace_export_accepts_sqlite_rows(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "trace.sqlite")
     run, trace = _run_and_trace(store)

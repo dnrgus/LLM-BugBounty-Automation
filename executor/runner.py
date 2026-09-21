@@ -43,6 +43,7 @@ class Executor:
         testcase: Testcase,
         url: str,
         idempotency_key: str | None = None,
+        session_id: str | None = None,
     ) -> TargetResponse:
         idempotency_key = idempotency_key or self._idempotency_key(run, trace, testcase)
         previous = self.store.get_checkpoint(idempotency_key)
@@ -122,7 +123,7 @@ class Executor:
                 metadata={"testcase_id": testcase.id, "idempotency_key": idempotency_key},
             )
         )
-        response = await self._send_with_retries(run, trace, testcase, idempotency_key)
+        response = await self._send_with_retries(run, trace, testcase, idempotency_key, session_id)
         for offset, target_event in enumerate(response.trace_events, start=7):
             self.store.insert_event(
                 TraceEvent(
@@ -159,8 +160,10 @@ class Executor:
         trace: Trace,
         testcase: Testcase,
         idempotency_key: str,
+        session_id: str | None = None,
     ) -> TargetResponse:
         last_error: Exception | None = None
+        session = session_id or self.sessions.session_for_trace(trace)
         for attempt in range(1, self.options.max_attempts + 1):
             self.store.insert_event(
                 TraceEvent(
@@ -172,7 +175,7 @@ class Executor:
             )
             try:
                 return await asyncio.wait_for(
-                    self.target.send(testcase.prompt, session=self.sessions.session_for_trace(trace)),
+                    self.target.send(testcase.prompt, session=session),
                     timeout=self.options.timeout_seconds,
                 )
             except Exception as exc:
