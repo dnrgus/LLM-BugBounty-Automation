@@ -21,6 +21,7 @@
 - Tool Doctor version snapshot, Promptfoo/Garak/PyRIT output normalization
 - Mutation Engine 전략 변형, lineage, hash dedup, 전략별 통계
 - PyRIT adaptive redteam 결과 기반 Adaptive Mutation Plan 생성 (multi-turn 성공 시나리오를 후속 mutation lineage로 연계)
+- PyRIT 기반 Adaptive Mutation을 기존 Executor/Judge Ensemble/Reproducer 파이프라인에 그대로 유입해 Finding/Evidence/Report 생성
 
 ## 빠른 시작
 
@@ -97,8 +98,11 @@ python main.py mutate --testcase-id LLM-TOOL-001 --strategy json_wrap --var RESO
 # PyRIT adaptive redteam 결과 정규화
 python main.py normalize-tool-output --tool pyrit --input tests/fixtures/tools/pyrit-results.json
 
-# PyRIT 성공 시나리오 기반 Adaptive Mutation Plan 생성
+# PyRIT 성공 시나리오 기반 Adaptive Mutation Plan 생성 (오프라인 미리보기, 실행 없음)
 python main.py adaptive-plan --input tests/fixtures/tools/pyrit-results.json
+
+# PyRIT 기반 Adaptive Mutation을 Executor/Judge/Reproducer 경로로 실행해 Finding까지 생성
+python main.py adaptive-run --input tests/fixtures/tools/pyrit-results.json
 ```
 
 ## 산출물

@@ -47,12 +47,12 @@ def test_pyrit_adapter_normalizes_adaptive_results() -> None:
     assert len(results) == 1
     result = results[0]
     assert result.source.tool == "pyrit"
-    assert result.category == "tool_abuse"
-    assert result.testcase_id == "LLM-TOOL-001"
+    assert result.category == "system_prompt_leak"
+    assert result.testcase_id == "LLM-SP-001"
     assert result.detector_score == 0.91
-    assert result.framework_tags["owasp_agentic_2026"] == ["AA02"]
+    assert result.framework_tags["owasp_llm_2026"] == ["LLM02"]
     assert result.metadata["strategy"] == "crescendo"
-    assert result.metadata["turn_count"] == 4
+    assert result.metadata["turn_count"] == 2
 
 
 def test_tool_doctor_snapshot_and_lock(tmp_path: Path) -> None:

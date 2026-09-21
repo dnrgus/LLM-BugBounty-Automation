@@ -11,7 +11,7 @@ from adapters.llm.pyrit import PyRITAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
-from core.orchestrator import run_sample_pipeline
+from core.orchestrator import run_adaptive_pipeline, run_sample_pipeline
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from scope.policy import PolicyEngine
@@ -152,6 +152,17 @@ def cmd_adaptive_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_adaptive_run(args: argparse.Namespace) -> int:
+    testcases = load_testcases(args.testcases)
+    engine = PolicyEngine.from_yaml(args.scope)
+    store = SQLiteStore(args.db)
+    result = asyncio.run(
+        run_adaptive_pipeline(engine, testcases, store, args.input, target_kind=args.target)
+    )
+    print(_json(result))
+    return 0
+
+
 def _adapter_for_tool(tool: str):
     if tool == "promptfoo":
         return PromptfooAdapter()
@@ -229,6 +240,17 @@ def build_parser() -> argparse.ArgumentParser:
     adaptive_plan.add_argument("--version")
     adaptive_plan.add_argument("--db", type=Path)
     adaptive_plan.set_defaults(func=cmd_adaptive_plan)
+
+    adaptive_run = sub.add_parser(
+        "adaptive-run",
+        help="Execute PyRIT-informed adaptive mutations through the Executor/Judge/Reproducer pipeline",
+    )
+    adaptive_run.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    adaptive_run.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    adaptive_run.add_argument("--input", type=Path, required=True)
+    adaptive_run.add_argument("--db", type=Path, default=Path("runs/adaptive.sqlite"))
+    adaptive_run.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
+    adaptive_run.set_defaults(func=cmd_adaptive_run)
 
     return parser
 
