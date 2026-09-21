@@ -7,6 +7,7 @@ from pathlib import Path
 
 from adapters.llm.garak import GarakAdapter
 from adapters.llm.promptfoo import PromptfooAdapter
+from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
 from core.orchestrator import run_sample_pipeline
 from core.tool_doctor import check_tools, write_tool_lock
@@ -111,6 +112,22 @@ def cmd_normalize_tool_output(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mutate(args: argparse.Namespace) -> int:
+    testcases = load_testcases(args.testcases)
+    selected = [case for case in testcases if case.id == args.testcase_id] if args.testcase_id else testcases
+    engine = MutationEngine(strategies=args.strategy or None)
+    candidates = []
+    for case in selected:
+        candidates.extend(engine.mutate(case, variables=dict(args.var or [])))
+    if args.db:
+        store = SQLiteStore(args.db)
+        store.initialize()
+        for candidate in candidates:
+            store.insert_mutation(candidate.to_record())
+    print(_json({"stats": mutation_stats(candidates), "mutations": [candidate.to_dict() for candidate in candidates]}))
+    return 0
+
+
 def _adapter_for_tool(tool: str):
     if tool == "promptfoo":
         return PromptfooAdapter()
@@ -166,6 +183,14 @@ def build_parser() -> argparse.ArgumentParser:
     normalize.add_argument("--target-id", default="target_fixture")
     normalize.add_argument("--version")
     normalize.set_defaults(func=cmd_normalize_tool_output)
+
+    mutate = sub.add_parser("mutate", help="Generate prompt mutations")
+    mutate.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    mutate.add_argument("--testcase-id")
+    mutate.add_argument("--strategy", action="append", choices=["identity", "markdown_wrap", "json_wrap", "roleplay", "multi_turn_split"])
+    mutate.add_argument("--var", action="append", nargs=2, metavar=("KEY", "VALUE"))
+    mutate.add_argument("--db", type=Path)
+    mutate.set_defaults(func=cmd_mutate)
 
     return parser
 

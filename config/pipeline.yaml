@@ -9,6 +9,9 @@ profiles:
     reproduction:
       attempts: 1
       threshold: 1
+    mutation:
+      enabled: false
+      strategies: [identity]
   llm:
     testcase_limit: 25
     judges: [rule, canary, regex, semantic]
@@ -19,3 +22,6 @@ profiles:
     reproduction:
       attempts: 5
       threshold: 3
+    mutation:
+      enabled: true
+      strategies: [identity, markdown_wrap, json_wrap, roleplay, multi_turn_split]

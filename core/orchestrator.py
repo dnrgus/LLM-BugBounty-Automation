@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from pathlib import Path
 
+from attacks.mutation import MutationEngine
 from core.fingerprint import build_environment_fingerprint
 from core.models import (
     Finding,
@@ -73,6 +74,7 @@ async def run_sample_pipeline(
     executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
     judges = JudgeEnsemble.default()
     reproducer = Reproducer(target=target, judges=judges)
+    mutation_engine = MutationEngine()
     findings: list[Finding] = []
     reports: list[str] = []
     reproduction_summary = {"confirmed": 0, "unstable": 0, "rejected": 0}
@@ -89,6 +91,9 @@ async def run_sample_pipeline(
         )
         prompt = PromptRecord(testcase_id=case.id, prompt_hash=case.content_hash, text=case.prompt)
         store.insert_prompt(prompt)
+        if case.mutation.get("enabled", False):
+            for mutation in mutation_engine.mutate(case):
+                store.insert_mutation(mutation.to_record())
         trace = Trace(run_id=run.id, testcase_id=case.id)
         store.insert_trace(trace)
         request = RequestRecord(
