@@ -394,6 +394,31 @@ class SQLiteStore:
             for row in rows
         ]
 
+    def get_finding(self, finding_id: str) -> Finding | None:
+        with self.connect() as conn:
+            row = conn.execute("select * from findings where id = ?", (finding_id,)).fetchone()
+        if row is None:
+            return None
+        return Finding(
+            id=row["id"],
+            run_id=row["run_id"],
+            testcase_id=row["testcase_id"],
+            title=row["title"],
+            category=row["category"],
+            status=FindingStatus(row["status"]),
+            confidence=row["confidence"],
+            severity=row["severity"],
+            evidence_ref=row["evidence_ref"],
+        )
+
+    def get_latest_prompt_text(self, testcase_id: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "select text from prompts where testcase_id = ? order by rowid desc limit 1",
+                (testcase_id,),
+            ).fetchone()
+        return row["text"] if row is not None else None
+
     def insert_reproduction(self, reproduction: Reproduction) -> None:
         data = asdict(reproduction)
         data["control_passed"] = int(reproduction.control_passed)

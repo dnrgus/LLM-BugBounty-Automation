@@ -14,7 +14,13 @@ from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
-from core.orchestrator import run_adaptive_pipeline, run_full_pipeline, run_profile_target, run_sample_pipeline
+from core.orchestrator import (
+    run_adaptive_pipeline,
+    run_full_pipeline,
+    run_profile_target,
+    run_reproduce_finding,
+    run_sample_pipeline,
+)
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
@@ -174,6 +180,25 @@ def cmd_adaptive_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reproduce(args: argparse.Namespace) -> int:
+    policy = PolicyEngine.from_yaml(args.scope)
+    testcases = load_testcases(args.testcases)
+    store = SQLiteStore(args.db)
+    result = asyncio.run(
+        run_reproduce_finding(
+            policy,
+            testcases,
+            store,
+            args.finding_id,
+            target_kind=args.target,
+            target_config=args.target_config,
+            minimize=args.minimize,
+        )
+    )
+    print(_json(result))
+    return 0
+
+
 def cmd_profile(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
@@ -310,6 +335,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip active probing; report only the target's declared capabilities",
     )
     profile_cmd.set_defaults(func=cmd_profile)
+
+    reproduce = sub.add_parser(
+        "reproduce",
+        help="Re-run reproduction for a stored finding against a live target, optionally minimizing a PoC",
+    )
+    reproduce.add_argument("finding_id")
+    reproduce.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    reproduce.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    reproduce.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
+    reproduce.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
+    reproduce.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
+    reproduce.add_argument(
+        "--minimize",
+        action="store_true",
+        help="If the finding still reproduces, also generate a minimal PoC",
+    )
+    reproduce.set_defaults(func=cmd_reproduce)
 
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
     judge_benchmark.add_argument("--benchmark", type=Path, default=DEFAULT_JUDGE_BENCHMARK)

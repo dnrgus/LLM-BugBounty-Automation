@@ -32,6 +32,7 @@
 - 실제 Target Adapter: `--target openai`(OpenAI 호환 Chat Completions API)와 `--target-config`(YAML로 설정하는 자체 스키마 REST API, `CustomHTTPAdapter`)로 실제 요청 전송. 세션별 multi-turn 대화 이력 유지, `Target*Error` 타입 체계(연결 실패/인증 실패/429/5xx/응답 파싱 실패)로 실패 원인 구분, `httpx.MockTransport` 기반 hermetic 테스트로 실제 네트워크 없이 검증(+ 로컬 mock 서버로 진짜 end-to-end 실행도 확인). API 키는 환경변수로만 주입 (커밋되지 않음)
 - Attack Budget: request/token/cost/runtime 예산과 카테고리별(per-suite) 예산을 프로필(`config/pipeline.yaml`)에 선언하면 `scan`/`sample-run`이 예산 소진 시 자동으로 중단. 연속된 target 오류(`repeated_target_errors`)도 크래시 대신 graceful하게 중단하고 결과에 사유를 남김
 - Capability Probe: `profile` 명령이 target config에 선언된 capability를 실제 probe 요청(Scope/Policy 게이트와 Executor를 그대로 통과)으로 검증 — 예: `sessions: true`라고 선언했지만 실제로는 turn 간 상태를 기억 못 하는 target을 잡아냄. Executor에 session override(`session_id`)를 추가해 서로 다른 Trace가 같은 target-side 세션을 공유하도록 지원
+- `reproduce <finding-id>`: 저장된 finding을 실제 target에 다시 재현(프로그램이 패치했는지 확인하는 용도). `--minimize`로 성공한 prompt를 segment 단위로 제거하며 재현이 유지되는 최소 형태까지 축소하는 Minimal PoC 생성, 결과를 evidence로 저장
 
 ## 빠른 시작
 
@@ -111,6 +112,10 @@ python main.py coverage --target fake-rag
 
 # Target capability probe (선언된 capability를 실제 요청으로 검증)
 python main.py profile --target-config config/targets/my-target.yaml --scope config/my-scope.yaml
+
+# 저장된 finding을 실제 target에 다시 재현 (프로그램이 패치했는지 확인) + Minimal PoC 생성
+python main.py reproduce finding_XXXXXXXXXXXX --target-config config/targets/my-target.yaml \
+  --scope config/my-scope.yaml --minimize
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark

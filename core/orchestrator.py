@@ -30,12 +30,13 @@ from core.models import (
 from core.profile import PipelineProfile
 from core.profiler import profile_target
 from executor.runner import Executor
-from findings.dedup import cluster_findings
+from findings.dedup import base_testcase_id, cluster_findings
 from findings.report import write_cluster_report
 from judges.ensemble import JudgeEnsemble
 from recon.pipeline import build_asset_map
 from reporting.evidence import write_evidence_bundle
 from reporting.reporter import write_json_report, write_markdown_report
+from reproduction.minimal_poc import minimize_poc
 from reproduction.reproducer import Reproducer
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
@@ -518,3 +519,76 @@ async def run_profile_target(
     executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
     profile = await profile_target(executor, target, run, store, probe=probe)
     return profile.to_dict()
+
+
+async def run_reproduce_finding(
+    policy: PolicyEngine,
+    testcases: list[Testcase],
+    store: SQLiteStore,
+    finding_id: str,
+    target_kind: str = "fake-llm",
+    target_config: Path | str | None = None,
+    minimize: bool = False,
+) -> dict[str, object]:
+    """Re-runs reproduction for a previously stored Finding against a live
+    target -- e.g. "did the program fix this since I first found it?" --
+    and, if it still reproduces, optionally minimizes the prompt to a
+    submittable PoC (design doc section 10).
+
+    Unlike a normal scan, this intentionally does not re-validate the
+    testcase suite's structure beyond needing the seed testcase for its
+    judges/severity: the actual prompt replayed is the exact one stored in
+    the run that first produced this finding (prompts.text), not whatever
+    the current suite file happens to contain.
+    """
+    finding = store.get_finding(finding_id)
+    if finding is None:
+        raise ValueError(f"finding not found: {finding_id}")
+
+    base_id = base_testcase_id(finding.testcase_id)
+    base_case = next((case for case in testcases if case.id == base_id), None)
+    if base_case is None:
+        raise ValueError(f"seed testcase '{base_id}' not found in the provided --testcases suite")
+
+    prompt_text = store.get_latest_prompt_text(finding.testcase_id) or base_case.prompt
+    case = replace(base_case, id=finding.testcase_id, prompt=prompt_text)
+
+    target = create_target(target_kind, target_config)
+    judges = JudgeEnsemble(case.judges)
+    reproducer = Reproducer(target=target, judges=judges)
+
+    session_prefix = f"reproduce:{finding_id}"
+    outcome = await reproducer.reproduce(case, session_prefix=session_prefix)
+
+    result: dict[str, object] = {
+        "finding_id": finding_id,
+        "testcase_id": finding.testcase_id,
+        "original_status": finding.status.value,
+        "reproduction": {
+            "attempts": outcome.attempts,
+            "successes": outcome.successes,
+            "threshold": outcome.threshold,
+            "success_rate": outcome.success_rate,
+            "control_passed": outcome.control_passed,
+            "status": outcome.status.value,
+        },
+    }
+
+    if minimize and outcome.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}:
+        poc = await minimize_poc(case, target, judges, session_prefix=session_prefix)
+        result["minimal_poc"] = poc.to_dict()
+        evidence_bundle = write_evidence_bundle(
+            Path("evidence/raw"),
+            Path("evidence/sanitized"),
+            f"{finding_id}_minimal_poc.json",
+            {
+                "finding_id": finding_id,
+                "original_prompt": poc.original_prompt,
+                "minimized_prompt": poc.minimized_prompt,
+                "removed_segments": poc.removed_segments,
+            },
+        )
+        evidence = store.record_evidence(finding.run_id, "minimal_poc", evidence_bundle.sanitized_path)
+        result["minimal_poc_evidence_id"] = evidence.id
+
+    return result
