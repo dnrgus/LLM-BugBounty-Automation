@@ -8,6 +8,7 @@ import yaml
 
 from events.websocket_target import WebSocketTargetAdapter, WebSocketTargetConfig
 from manifest.loader import build_manifest_target
+from plugins import get_plugin
 from targets.base import TargetAdapter
 from targets.http_target import CustomHTTPAdapter, CustomHTTPConfig, HTTPTargetConfig, OpenAICompatibleTarget
 
@@ -40,8 +41,17 @@ def load_target(path: Path | str) -> TargetAdapter:
 
     adapter_kind = target.get("adapter")
     if adapter_kind not in _SUPPORTED_ADAPTERS:
+        # U12 Plugin SDK: an adapter kind this function doesn't know
+        # about at all can still be supplied by a registered plugin
+        # (plugins/registry.py) -- built in (e.g. "browser") or
+        # third-party, via a llmbb.target_adapters entry point -- without
+        # ever editing this function.
+        plugin_builder = get_plugin(adapter_kind)
+        if plugin_builder is not None:
+            return plugin_builder(target)
         raise ValueError(
-            f"unsupported adapter '{adapter_kind}' in {path}; expected one of {sorted(_SUPPORTED_ADAPTERS)}"
+            f"unsupported adapter '{adapter_kind}' in {path}; expected one of {sorted(_SUPPORTED_ADAPTERS)} "
+            "or a registered plugin"
         )
     if "base_url" not in target:
         raise ValueError(f"target config {path} is missing required field 'base_url'")

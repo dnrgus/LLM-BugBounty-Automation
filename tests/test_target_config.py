@@ -4,6 +4,7 @@ import pytest
 
 from events.websocket_target import WebSocketTargetAdapter
 from manifest.adapter import CompatibilityAdapter
+from plugins.browser import BrowserTargetAdapter
 from targets.config import load_target
 from targets.http_target import CustomHTTPAdapter, OpenAICompatibleTarget
 
@@ -126,6 +127,29 @@ target:
     assert target.config.type_field == "kind"
     assert target.config.token_types == ("chunk",)
     assert target.config.extra_headers["Authorization"] == "Bearer sk-ws"
+
+
+def test_load_target_builds_browser_adapter_via_plugin_fallback(tmp_path: Path) -> None:
+    # "browser" is not in targets.config._SUPPORTED_ADAPTERS -- this
+    # proves U12's plugin-registry fallback, not a hardcoded branch.
+    config_path = tmp_path / "browser.yaml"
+    config_path.write_text(
+        """
+target:
+  id: lab-browser
+  adapter: browser
+  base_url: https://chat.example.com
+  selectors:
+    input: "#chat-input"
+    response: "#reply"
+""",
+        encoding="utf-8",
+    )
+    target = load_target(config_path)
+    assert isinstance(target, BrowserTargetAdapter)
+    assert target.config.url == "https://chat.example.com"
+    assert target.config.input_selector == "#chat-input"
+    assert target.config.response_selector == "#reply"
 
 
 def test_load_target_requires_api_key_env_to_be_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
