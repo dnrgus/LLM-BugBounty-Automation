@@ -17,11 +17,10 @@ from core.models import (
 )
 from executor.runner import Executor
 from judges.ensemble import JudgeEnsemble
-from reporting.reporter import write_markdown_report
-from reporting.sanitizer import sanitize_artifact
+from reporting.evidence import write_evidence_bundle
+from reporting.reporter import write_json_report, write_markdown_report
 from reproduction.reproducer import Reproducer
 from scope.policy import PolicyEngine
-from storage.artifacts import write_json_artifact
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
 from testcase.coverage import build_coverage_matrix, coverage_summary
@@ -117,13 +116,19 @@ async def run_sample_pipeline(
         )
         judgement = judges.judge(run.id, case, response.text)
         store.insert_judgement(judgement)
-        raw_path = write_json_artifact(
+        evidence_bundle = write_evidence_bundle(
             Path("evidence/raw"),
+            Path("evidence/sanitized"),
             f"{run.id}_{case.id}.json",
-            {"prompt": response.prompt, "response": response.text, "trace_id": trace.id},
+            {
+                "prompt": response.prompt,
+                "response": response.text,
+                "trace_id": trace.id,
+                "judgement": judgement.reason,
+                "environment_fingerprint": run.fingerprint,
+            },
         )
-        sanitized = sanitize_artifact(raw_path, Path("evidence/sanitized"))
-        evidence = store.record_evidence(run.id, "llm_response", sanitized)
+        evidence = store.record_evidence(run.id, "llm_response", evidence_bundle.sanitized_path)
         if judgement.passed:
             reproduction = await reproducer.reproduce(case, session_prefix=f"{run.id}:{case.id}")
             finding = Finding(
@@ -141,9 +146,29 @@ async def run_sample_pipeline(
             reproduction_summary[finding.status.value] = reproduction_summary.get(finding.status.value, 0) + 1
             if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}:
                 findings.append(finding)
-                report = write_markdown_report(Path("reports/shareable"), run, case, finding, judgement, sanitized)
+                metadata = evidence_bundle.to_dict()
+                report = write_markdown_report(
+                    Path("reports/shareable"),
+                    run,
+                    case,
+                    finding,
+                    judgement,
+                    evidence_bundle.sanitized_path,
+                    reproduction=reproduction,
+                    evidence_metadata=metadata,
+                )
+                json_report = write_json_report(
+                    Path("reports/shareable"),
+                    run,
+                    case,
+                    finding,
+                    judgement,
+                    metadata,
+                    reproduction=reproduction,
+                )
                 store.record_report(run.id, report)
-                reports.append(str(report))
+                store.record_report(run.id, json_report)
+                reports.extend([str(report), str(json_report)])
 
     return {
         "run_id": run.id,

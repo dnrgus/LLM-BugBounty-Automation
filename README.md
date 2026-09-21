@@ -17,7 +17,7 @@
 - 테스트케이스 schema validation, capability/policy 기반 selector, prompt rendering
 - Executor session/checkpoint, timeout, retry, idempotency key, trace export
 - Reproducer repeat attempts, negative controls, confirmed/unstable/rejected 상태 전이
-- deterministic judge, judge benchmark, evidence redaction, 기본 Markdown report
+- deterministic judge, judge benchmark, raw/sanitized evidence, redaction log, Markdown/JSON report
 
 ## 빠른 시작
 
@@ -81,6 +81,25 @@ python main.py coverage --target fake-rag
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark
+```
+
+## 산출물
+
+`sample-run`은 다음 산출물을 로컬에 생성합니다.
+
+- `evidence/raw/`: 원본 요청/응답 Evidence
+- `evidence/sanitized/`: redaction 적용 Evidence와 redaction log
+- `reports/shareable/`: 제출용 Markdown/JSON report
+
+위 경로는 기본적으로 `.gitignore` 대상입니다.
+
+## v0.1.0-mvp1 Release Gate
+
+```bash
+pytest
+python main.py judge-benchmark
+python main.py sample-run --target fake-llm
+git status --short
 ```
 
 ## 마일스톤
