@@ -28,6 +28,7 @@
 - RAG Test Harness: controlled/injection 문서 corpus, chunking, deterministic retrieval, retrieval trace, RAG corpus hash를 Environment Fingerprint에 포함
 - Finding Dedup/Root Cause Clustering: category+seed testcase 기반 exact dedup과 제목 유사도 기반 heuristic dedup, root_cause_key는 run 간에도 안정적이라 동일 원인 재발을 연결 가능. `sample-run`/`adaptive-run`이 root cause cluster report를 자동 생성
 - Full Orchestrator: `scan --profile {quick,llm,agent,rag,web,full}`이 scope/policy → recon → classify → scan → judge → reproduce → dedup → report를 프로필별 설정(judges/executor/reproduction/mutation/target)으로 end-to-end 연결. `full` 프로필은 LLM/Agent/RAG scan과 PyRIT adaptive 결과를 하나의 root cause cluster로 통합
+- Hardening: 외부 도구 출력의 score 필드 타입 변경(예: 숫자 → 문자열 라벨)이 파서를 crash시키지 않고 graceful하게 처리, Evidence Sanitizer에 AWS access key/PEM private key 패턴 추가, clean install(`pip install -e ".[dev]"` → `pytest` → `scan --profile full`)을 별도 venv에서 검증
 
 ## 빠른 시작
 
@@ -160,6 +161,40 @@ python main.py sample-run --target fake-llm
 git status --short
 ```
 
+## v1.0.0 Release Gate
+
+```bash
+# clean install (별도 venv 권장)
+python -m venv .venv && . .venv/bin/activate
+python -m pip install -e ".[dev]"
+
+pytest
+python main.py doctor
+python main.py judge-benchmark
+python main.py sample-run
+python main.py sample-run --target fake-agent
+python main.py sample-run --target fake-rag
+python main.py scan --profile full
+git status --short
+```
+
+### v1.0.0 완료 범위
+
+- Phase 0~16 전체: core model/storage, scope+policy, target adapter, testcase/coverage,
+  executor/trace/approval gate, judge ensemble/benchmark, reproducer/control, evidence/report,
+  tool doctor + Promptfoo/Garak/PyRIT, mutation engine, recon, web/secret scanner, AI endpoint
+  classifier + RAG harness, finding dedup/root cause, full orchestrator
+- Hardening: 외부 도구 출력 파싱이 예상치 못한 필드 타입에서도 crash하지 않고 graceful하게 처리,
+  Evidence Sanitizer 패턴 보강, clean install부터 `scan --profile full`까지 별도 venv에서 검증
+
+### 알려진 제한사항 (Known Limitations)
+
+- Fake LLM/Agent/RAG Target만 번들되어 있으며, 실제 LLM API/웹 서비스용 Target Adapter는 아직 없음 (`targets/base.py`의 계약을 구현하면 추가 가능)
+- Promptfoo/Garak/PyRIT/Nuclei/Dalfox/TruffleHog는 실제 CLI를 직접 실행하지 않고, 각 도구가 생성한 JSON/JSONL 출력 파일을 정규화하는 방식만 지원 (Adapter-first 설계 원칙에 따름)
+- RAG retrieval은 실제 embedding/vector store가 아니라 오프라인 재현성을 위한 결정론적 Jaccard 토큰 overlap으로 근사됨
+- Root Cause Clustering은 단일 패스 greedy 그룹핑이며 pgvector 기반 semantic clustering은 v2 계획 (설계서 22절)
+- Judge는 rule/regex/canary만 구현되어 있고, `llm`/`full` 프로필 설정에 남아있는 `semantic` judge 항목은 아직 미구현 (해당 이름을 사용하는 judge 요청은 조용히 no-op 처리됨)
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -167,7 +202,7 @@ git status --short
 - `v0.1.0-mvp1`: core validation loop, evidence, basic reporting
 - `v0.2.0-llm-redteam`: Promptfoo/Garak/Mutation/PyRIT 통합
 - `v0.3.0-discovery`: recon, web security tools, AI discovery, RAG harness 통합
-- `v1.0.0`: 안정화된 첫 릴리스
+- `v1.0.0`: 안정화된 첫 릴리스 (full orchestrator, dedup/root cause, hardening)
 
 ## 개발 흐름
 

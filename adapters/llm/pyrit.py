@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from adapters.base import NormalizedResult, ToolSource
+from adapters.base import NormalizedResult, ToolSource, safe_float
 
 
 class PyRITAdapter:
@@ -31,9 +31,9 @@ class PyRITAdapter:
         attempts = data.get("attempts") or data.get("results") or []
         results: list[NormalizedResult] = []
         for attempt in attempts:
-            score = attempt.get("score", attempt.get("objective_score"))
+            score = safe_float(attempt.get("score", attempt.get("objective_score")))
             success = bool(attempt.get("success", attempt.get("objective_achieved", False)))
-            if not success and not (score is not None and float(score) > 0):
+            if not success and not (score is not None and score > 0):
                 continue
             objective = attempt.get("objective") or data.get("objective") or "PyRIT adaptive objective"
             category = attempt.get("category") or data.get("category") or "adaptive_redteam"
@@ -48,7 +48,7 @@ class PyRITAdapter:
                     testcase_id=None if attempt.get("testcase_id") is None else str(attempt["testcase_id"]),
                     trace_ref=attempt.get("trace_ref"),
                     raw_artifact_ref=raw_artifact_ref,
-                    detector_score=None if score is None else float(score),
+                    detector_score=score,
                     framework_tags=_framework_tags(attempt, data),
                     metadata={
                         "turn_count": len(turns),
