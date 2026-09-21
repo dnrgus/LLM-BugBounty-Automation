@@ -261,13 +261,13 @@ def build_parser() -> argparse.ArgumentParser:
     sample.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     sample.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     sample.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
-    sample.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
+    sample.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     sample.set_defaults(func=cmd_sample_run)
 
     coverage = sub.add_parser("coverage", help="Show testcase coverage for a target profile")
     coverage.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     coverage.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
-    coverage.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
+    coverage.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     coverage.set_defaults(func=cmd_coverage)
 
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
@@ -314,7 +314,7 @@ def build_parser() -> argparse.ArgumentParser:
     adaptive_run.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     adaptive_run.add_argument("--input", type=Path, required=True)
     adaptive_run.add_argument("--db", type=Path, default=Path("runs/adaptive.sqlite"))
-    adaptive_run.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag"], default="fake-llm")
+    adaptive_run.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     adaptive_run.set_defaults(func=cmd_adaptive_run)
 
     recon = sub.add_parser(
