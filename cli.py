@@ -14,7 +14,8 @@ from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.fingerprint import build_environment_fingerprint
-from core.orchestrator import run_adaptive_pipeline, run_sample_pipeline
+from core.orchestrator import run_adaptive_pipeline, run_full_pipeline, run_sample_pipeline
+from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from recon.pipeline import build_asset_map
@@ -30,6 +31,8 @@ DEFAULT_SCOPE = Path("config/scope.example.yaml")
 DEFAULT_TESTCASES = Path("testcase/suites/basic.yaml")
 DEFAULT_JUDGE_BENCHMARK = Path("benchmarks/judge/baseline.json")
 DEFAULT_TOOLS = Path("config/tools.yaml")
+DEFAULT_PIPELINE_CONFIG = Path("config/pipeline.yaml")
+DEFAULT_FIXTURES = Path("tests/fixtures/tools")
 
 
 def _json(data: object) -> str:
@@ -184,6 +187,37 @@ def cmd_recon(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_scan(args: argparse.Namespace) -> int:
+    profile = load_profile(args.profile, args.pipeline_config)
+    policy = PolicyEngine.from_yaml(args.scope)
+    testcases = load_testcases(args.testcases)
+    store = SQLiteStore(args.db)
+    recon_inputs = {
+        "subfinder": args.subfinder_input,
+        "httpx": args.httpx_input,
+        "katana": args.katana_input,
+        "ffuf": args.ffuf_input,
+    }
+    external_inputs = {
+        "nuclei": args.nuclei_input,
+        "dalfox": args.dalfox_input,
+        "trufflehog": args.trufflehog_input,
+    }
+    result = asyncio.run(
+        run_full_pipeline(
+            policy,
+            testcases,
+            store,
+            profile,
+            recon_inputs=recon_inputs,
+            pyrit_input=args.pyrit_input,
+            external_inputs=external_inputs,
+        )
+    )
+    print(_json(result))
+    return 0
+
+
 def _adapter_for_tool(tool: str):
     if tool == "promptfoo":
         return PromptfooAdapter()
@@ -296,6 +330,25 @@ def build_parser() -> argparse.ArgumentParser:
     recon.add_argument("--katana-input", type=Path)
     recon.add_argument("--ffuf-input", type=Path)
     recon.set_defaults(func=cmd_recon)
+
+    scan = sub.add_parser(
+        "scan",
+        help="Run the full orchestrator (scope -> recon -> classify -> scan -> judge -> reproduce -> dedup -> report) for a profile",
+    )
+    scan.add_argument("--profile", choices=["quick", "llm", "agent", "rag", "web", "full"], required=True)
+    scan.add_argument("--pipeline-config", type=Path, default=DEFAULT_PIPELINE_CONFIG)
+    scan.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
+    scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))
+    scan.add_argument("--subfinder-input", type=Path, default=DEFAULT_FIXTURES / "subfinder-results.jsonl")
+    scan.add_argument("--httpx-input", type=Path, default=DEFAULT_FIXTURES / "httpx-results.jsonl")
+    scan.add_argument("--katana-input", type=Path, default=DEFAULT_FIXTURES / "katana-results.jsonl")
+    scan.add_argument("--ffuf-input", type=Path, default=DEFAULT_FIXTURES / "ffuf-results.json")
+    scan.add_argument("--nuclei-input", type=Path, default=DEFAULT_FIXTURES / "nuclei-results.jsonl")
+    scan.add_argument("--dalfox-input", type=Path, default=DEFAULT_FIXTURES / "dalfox-results.json")
+    scan.add_argument("--trufflehog-input", type=Path, default=DEFAULT_FIXTURES / "trufflehog-results.jsonl")
+    scan.add_argument("--pyrit-input", type=Path, default=DEFAULT_FIXTURES / "pyrit-results.json")
+    scan.set_defaults(func=cmd_scan)
 
     return parser
 

@@ -33,13 +33,22 @@ class ReproductionOutcome:
 
 
 class Reproducer:
-    def __init__(self, target: TargetAdapter, judges: JudgeEnsemble):
+    def __init__(
+        self,
+        target: TargetAdapter,
+        judges: JudgeEnsemble,
+        default_attempts: int = 1,
+        default_threshold: int | None = None,
+    ):
         self.target = target
         self.judges = judges
+        self.default_attempts = default_attempts
+        self.default_threshold = default_threshold
 
     async def reproduce(self, testcase: Testcase, session_prefix: str) -> ReproductionOutcome:
-        attempts = int(testcase.reproduce.get("attempts", 1) or 1)
-        threshold = int(testcase.reproduce.get("threshold", attempts) or attempts)
+        attempts = int(testcase.reproduce.get("attempts", self.default_attempts) or self.default_attempts)
+        default_threshold = self.default_threshold if self.default_threshold is not None else attempts
+        threshold = int(testcase.reproduce.get("threshold", default_threshold) or default_threshold)
         successes = 0
         for attempt in range(1, attempts + 1):
             session = f"{session_prefix}:repro:{attempt}"

@@ -27,6 +27,7 @@
 - Recon Endpoint를 AI API/Chat/RAG/Agent로 분류하는 offline 휴리스틱 Classifier
 - RAG Test Harness: controlled/injection 문서 corpus, chunking, deterministic retrieval, retrieval trace, RAG corpus hash를 Environment Fingerprint에 포함
 - Finding Dedup/Root Cause Clustering: category+seed testcase 기반 exact dedup과 제목 유사도 기반 heuristic dedup, root_cause_key는 run 간에도 안정적이라 동일 원인 재발을 연결 가능. `sample-run`/`adaptive-run`이 root cause cluster report를 자동 생성
+- Full Orchestrator: `scan --profile {quick,llm,agent,rag,web,full}`이 scope/policy → recon → classify → scan → judge → reproduce → dedup → report를 프로필별 설정(judges/executor/reproduction/mutation/target)으로 end-to-end 연결. `full` 프로필은 LLM/Agent/RAG scan과 PyRIT adaptive 결과를 하나의 root cause cluster로 통합
 
 ## 빠른 시작
 
@@ -47,7 +48,7 @@ pytest
 
 ```text
 config/        파이프라인, 모델, 도구, 로깅, Scope 예시
-core/          orchestrator, 데이터 모델, fingerprint
+core/          orchestrator, Full Orchestrator, pipeline profile, 데이터 모델, fingerprint
 scope/         Scope와 Program Policy 검사
 targets/       Target Adapter 계약과 Fake Target
 adapters/      LLM/Recon/Discovery 외부 도구 어댑터
@@ -130,6 +131,14 @@ python main.py recon \
 
 # RAG Test Harness: controlled/injection 문서 retrieval과 canary 유출을 Judge/Reproducer로 검증
 python main.py sample-run --target fake-rag
+
+# Full Orchestrator: scope/policy -> recon -> classify -> scan -> judge -> reproduce -> dedup -> report
+# (인자를 생략하면 번들 fixture로 로컬에서 바로 end-to-end 실행됨)
+python main.py scan --profile full
+
+# 단일 프로필만 빠르게 실행하고 싶을 때
+python main.py scan --profile web
+python main.py scan --profile agent
 ```
 
 ## 산출물

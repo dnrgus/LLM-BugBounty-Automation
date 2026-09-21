@@ -12,6 +12,8 @@ profiles:
     mutation:
       enabled: false
       strategies: [identity]
+    targets: [fake-llm]
+    stages: [scan]
   llm:
     testcase_limit: 25
     judges: [rule, canary, regex, semantic]
@@ -25,3 +27,65 @@ profiles:
     mutation:
       enabled: true
       strategies: [identity, markdown_wrap, json_wrap, roleplay, multi_turn_split]
+    targets: [fake-llm]
+    stages: [scan]
+  agent:
+    testcase_limit: 15
+    judges: [rule, canary, regex]
+    executor:
+      timeout_seconds: 15
+      max_attempts: 2
+      retry_backoff_seconds: 0.25
+    reproduction:
+      attempts: 3
+      threshold: 2
+    mutation:
+      enabled: true
+      strategies: [identity, roleplay, multi_turn_split]
+    targets: [fake-agent]
+    stages: [scan]
+  rag:
+    testcase_limit: 15
+    judges: [rule, canary, regex]
+    executor:
+      timeout_seconds: 15
+      max_attempts: 2
+      retry_backoff_seconds: 0.25
+    reproduction:
+      attempts: 3
+      threshold: 2
+    mutation:
+      enabled: false
+      strategies: [identity]
+    targets: [fake-rag]
+    stages: [scan]
+  web:
+    testcase_limit: 0
+    judges: []
+    executor:
+      timeout_seconds: 10
+      max_attempts: 1
+      retry_backoff_seconds: 0
+    reproduction:
+      attempts: 1
+      threshold: 1
+    mutation:
+      enabled: false
+      strategies: [identity]
+    targets: []
+    stages: [recon, external_scan]
+  full:
+    testcase_limit: 25
+    judges: [rule, canary, regex]
+    executor:
+      timeout_seconds: 20
+      max_attempts: 2
+      retry_backoff_seconds: 0.25
+    reproduction:
+      attempts: 5
+      threshold: 3
+    mutation:
+      enabled: true
+      strategies: [identity, markdown_wrap, json_wrap, roleplay, multi_turn_split]
+    targets: [fake-llm, fake-agent, fake-rag]
+    stages: [recon, scan, adaptive, external_scan]
