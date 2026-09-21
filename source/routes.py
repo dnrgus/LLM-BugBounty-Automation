@@ -11,7 +11,11 @@ from source.ingestion import SourceFile
 # itself (it's the methods=[...] kwarg), so that one case reports method
 # "ROUTE" rather than guessing -- still locates the endpoint precisely.
 _FASTAPI_FLASK_ROUTE = re.compile(r'@(?:\w+)\.(get|post|put|delete|patch|route)\(\s*["\']([^"\']+)["\']')
-_EXPRESS_ROUTE = re.compile(r'(?:app|router)\.(get|post|put|delete|patch)\(\s*["\']([^"\']+)["\']')
+# (?<!@) keeps this from also matching a Python @app.get(...)/@app.post(...)
+# decorator -- without it, an explicit-method Flask/FastAPI decorator (unlike
+# the generic @app.route(...) form) is a substring match for both patterns,
+# double-counting one real route as two with different "framework" tags.
+_EXPRESS_ROUTE = re.compile(r'(?<!@)(?:app|router)\.(get|post|put|delete|patch)\(\s*["\']([^"\']+)["\']')
 _DJANGO_PATH = re.compile(r'\bpath\(\s*r?["\']([^"\']*)["\']')
 
 _ROUTE_LANGUAGES = {"python", "javascript", "typescript"}

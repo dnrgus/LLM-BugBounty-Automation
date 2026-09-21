@@ -31,6 +31,18 @@ def test_extract_routes_finds_flask_endpoints() -> None:
     assert ("ROUTE", "/api/admin/run") in locations
 
 
+def test_extract_routes_does_not_double_count_an_explicit_method_decorator() -> None:
+    # @app.get(...)/@app.post(...) is Flask/FastAPI decorator syntax, but its
+    # text also looks like an Express.js app.get(...) call -- must be
+    # detected once, not once per matching pattern.
+    result = ingest_source(Path("tests/fixtures/source/hybrid_app"))
+    routes = extract_routes(result.files)
+    about_routes = [item for item in routes if item.location == "/about"]
+    assert len(about_routes) == 1
+    assert about_routes[0].metadata["method"] == "GET"
+    assert about_routes[0].metadata["framework"] == "flask_fastapi"
+
+
 def test_audit_source_produces_expected_attack_surface_shape() -> None:
     result = audit_source(FIXTURE)
     assert result["primary_language"] == "python"
