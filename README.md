@@ -19,6 +19,7 @@
 - Reproducer repeat attempts, negative controls, confirmed/unstable/rejected 상태 전이
 - deterministic judge, judge benchmark, raw/sanitized evidence, redaction log, Markdown/JSON report
 - Tool Doctor version snapshot, Promptfoo/Garak output normalization
+- Mutation Engine 전략 변형, lineage, hash dedup, 전략별 통계
 
 ## 빠른 시작
 
@@ -88,6 +89,9 @@ python main.py doctor --json --write-lock
 
 # Promptfoo/Garak 결과 정규화
 python main.py normalize-tool-output --tool promptfoo --input tests/fixtures/tools/promptfoo-results.json
+
+# Prompt mutation 생성
+python main.py mutate --testcase-id LLM-TOOL-001 --strategy json_wrap --var RESOURCE "admin console"
 ```
 
 ## 산출물
