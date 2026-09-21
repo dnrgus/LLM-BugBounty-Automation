@@ -18,6 +18,7 @@
 - Executor session/checkpoint, timeout, retry, idempotency key, trace export
 - Reproducer repeat attempts, negative controls, confirmed/unstable/rejected 상태 전이
 - deterministic judge, judge benchmark, raw/sanitized evidence, redaction log, Markdown/JSON report
+- Tool Doctor version snapshot, Promptfoo/Garak output normalization
 
 ## 빠른 시작
 
@@ -81,6 +82,12 @@ python main.py coverage --target fake-rag
 
 # Judge baseline benchmark 실행
 python main.py judge-benchmark
+
+# 외부 도구 상태 점검 및 lock 파일 생성
+python main.py doctor --json --write-lock
+
+# Promptfoo/Garak 결과 정규화
+python main.py normalize-tool-output --tool promptfoo --input tests/fixtures/tools/promptfoo-results.json
 ```
 
 ## 산출물
