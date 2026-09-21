@@ -1,0 +1,30 @@
+# U11 generic WebSocket transport -- for a target that streams tokens
+# over a WebSocket rather than a plain HTTP request/response.
+#
+# frame.type_field / frame.text_field / frame.{token,final,error}_types
+# make the frame JSON shape configurable, since streaming APIs disagree
+# on it. The default shape is {"type": "token", "content": "..."} for
+# each token and {"type": "final"} / {"type": "done"} to end the stream.
+#
+# Usage:
+#   export TARGET_API_KEY=...
+#   python main.py sample-run --target openai --target-config config/targets/websocket.example.yaml \
+#     --scope config/my-scope.yaml
+
+target:
+  id: example-websocket-target
+  adapter: websocket
+  base_url: wss://lab.example.com/stream
+  auth:
+    api_key_env: TARGET_API_KEY
+    header_name: Authorization
+    header_prefix: "Bearer "
+  frame:
+    type_field: type
+    text_field: content
+    token_types: [token, delta]
+    final_types: [final, done, end]
+    error_types: [error]
+  timeout_seconds: 30
+  capabilities:
+    chat: true
