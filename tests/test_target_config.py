@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from events.websocket_target import WebSocketTargetAdapter
 from manifest.adapter import CompatibilityAdapter
 from targets.config import load_target
 from targets.http_target import CustomHTTPAdapter, OpenAICompatibleTarget
@@ -98,6 +99,35 @@ target:
     assert target._auth_headers["Authorization"] == "Bearer sk-universal"
 
 
+def test_load_target_builds_websocket_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TARGET_API_KEY", "sk-ws")
+    config_path = tmp_path / "websocket.yaml"
+    config_path.write_text(
+        """
+target:
+  id: lab-ws
+  adapter: websocket
+  base_url: wss://lab.example.com/stream
+  auth:
+    api_key_env: TEST_TARGET_API_KEY
+  frame:
+    type_field: kind
+    text_field: text
+    token_types: [chunk]
+    final_types: [complete]
+  capabilities:
+    chat: true
+""",
+        encoding="utf-8",
+    )
+    target = load_target(config_path)
+    assert isinstance(target, WebSocketTargetAdapter)
+    assert target.config.url == "wss://lab.example.com/stream"
+    assert target.config.type_field == "kind"
+    assert target.config.token_types == ("chunk",)
+    assert target.config.extra_headers["Authorization"] == "Bearer sk-ws"
+
+
 def test_load_target_requires_api_key_env_to_be_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MISSING_TARGET_KEY", raising=False)
     config_path = tmp_path / "target.yaml"
@@ -116,11 +146,14 @@ target:
 
 
 def test_load_target_rejects_unsupported_adapter(tmp_path: Path) -> None:
+    # "websocket" was this test's example of an unsupported adapter until
+    # U11 added real support for it -- use a still-genuinely-unsupported
+    # name instead.
     config_path = tmp_path / "bad.yaml"
     config_path.write_text(
         """
 target:
-  adapter: websocket
+  adapter: graphql
   base_url: https://lab.example.com
 """,
         encoding="utf-8",

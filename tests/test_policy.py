@@ -9,6 +9,25 @@ def test_scope_allows_configured_url() -> None:
     assert decision.allowed
 
 
+def test_scope_allows_configured_ws_and_wss_urls() -> None:
+    engine = PolicyEngine(
+        {
+            "program": "ws-test",
+            "scope": {"domains": ["lab.example.com"], "url_patterns": ["wss://lab.example.com/*"]},
+            "testing": {"automated_scanning": True},
+        }
+    )
+    assert engine.validate_url("wss://lab.example.com/stream").allowed
+    assert not engine.validate_url("ws://other.example.com/stream").allowed
+
+
+def test_scope_rejects_unsupported_scheme() -> None:
+    engine = PolicyEngine.from_yaml(Path("config/scope.example.yaml"))
+    decision = engine.validate_url("ftp://ai.example.com/api/chat")
+    assert not decision.allowed
+    assert "unsupported URL scheme" in decision.reason
+
+
 def test_scope_blocks_other_domain() -> None:
     engine = PolicyEngine.from_yaml(Path("config/scope.example.yaml"))
     decision = engine.validate_url("https://evil.example.net/api/chat")

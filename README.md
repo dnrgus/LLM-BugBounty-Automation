@@ -50,6 +50,7 @@
 - HYBRID MODE (`correlate <source_path> <url>`): SOURCE 정적분석과 LIVE discovery를 같은 대상에 대해 함께 실행하고, U2의 AttackSurfaceItem merge 규칙으로 합류 — 소스에서 발견된 route가 실제로 LIVE에서도 관측되면 confidence가 올라가고 `source_type: "merged"`로 양쪽 provenance를 함께 기록 ("정적 root cause + 실제 도달 가능성"이 둘 다 확인된 경우). LIVE에서 관측되지 않은 SOURCE 전용 발견(예: admin 전용 sink)은 그대로 낮은 확신도로 남음
 - Scenario Engine (`run-scenario`): 기존 단일 testcase 기반 Executor 경로와 나란히 동작하는 multi-turn/cross-session 공격 워크플로우 실행기. 각 step은 자신만의 `session_ref`를 가질 수 있어 "세션 A에서 정보를 흘리고, 세션 B에서 그걸 다시 물어본다" 같은 cross-session 시나리오를 표현 가능. `{{PREV_RESPONSE}}` / `{{STEP:id}}`로 이전 step의 응답을 다음 step 프롬프트에 템플릿으로 삽입
 - Universal Manifest (`adapter: universal`): 기존 `openai_compatible`/`custom_http` target.yaml 스키마는 그대로 두고, 세 번째 어댑터 종류로 Auth(none/bearer/api_key/basic) × Interaction(chat_completions의 실제 messages 배열 / custom_json 템플릿) × Session(stateful 여부)을 독립적으로 조립하는 `CompatibilityAdapter` 추가. `config/targets/universal.example.yaml` 참고 — 기존 `sample-run`/`scan`/`run-scenario` 등 모든 CLI 명령이 그대로 사용 가능
+- Event 모델 + 범용 WebSocket 전송 (`adapter: websocket`): 스트리밍 대상을 위한 네 번째 어댑터 종류. START/TOKEN/RETRIEVAL/TOOL_CALL/FINAL/ERROR 형식 Event 모델로 임의의 WS 프레임 형식(설정 가능한 `type_field`/`text_field`/`*_types`)을 해석해 하나의 TargetResponse로 합침. `config/targets/websocket.example.yaml` 참고 — Scope/Policy 엔진도 `ws://`/`wss://` 스킴을 인식하도록 함께 확장
 
 ## 빠른 시작
 

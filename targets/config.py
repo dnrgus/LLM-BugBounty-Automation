@@ -6,11 +6,12 @@ from typing import Any
 
 import yaml
 
+from events.websocket_target import WebSocketTargetAdapter, WebSocketTargetConfig
 from manifest.loader import build_manifest_target
 from targets.base import TargetAdapter
 from targets.http_target import CustomHTTPAdapter, CustomHTTPConfig, HTTPTargetConfig, OpenAICompatibleTarget
 
-_SUPPORTED_ADAPTERS = {"openai_compatible", "custom_http", "universal"}
+_SUPPORTED_ADAPTERS = {"openai_compatible", "custom_http", "universal", "websocket"}
 
 
 def _resolve_auth_header(auth: dict[str, Any]) -> dict[str, str]:
@@ -60,6 +61,29 @@ def load_target(path: Path | str) -> TargetAdapter:
     base_url = str(target["base_url"])
     timeout_seconds = float(target.get("timeout_seconds", 30.0))
     capabilities = dict(target.get("capabilities") or {"chat": True})
+
+    if adapter_kind == "websocket":
+        # U11 generic WebSocket transport: base_url is the ws://.../wss://...
+        # endpoint itself; auth uses the same api_key_env header scheme as
+        # custom_http/openai_compatible (headers built above), just applied
+        # to the WS handshake instead of an HTTP request.
+        frame = target.get("frame") or {}
+        return WebSocketTargetAdapter(
+            WebSocketTargetConfig(
+                id=target_id,
+                name=target_id,
+                version=str(target.get("version", "unknown")),
+                url=base_url,
+                type_field=str(frame.get("type_field", "type")),
+                text_field=str(frame.get("text_field", "content")),
+                token_types=tuple(frame.get("token_types", ["token", "delta"])),
+                final_types=tuple(frame.get("final_types", ["final", "done", "end"])),
+                error_types=tuple(frame.get("error_types", ["error"])),
+                capabilities=capabilities,
+                timeout_seconds=timeout_seconds,
+                extra_headers={k: v for k, v in headers.items() if k != "Content-Type"},
+            )
+        )
 
     if adapter_kind == "openai_compatible":
         model = str(target.get("model", "gpt-4o-mini"))

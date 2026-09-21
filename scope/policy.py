@@ -60,7 +60,10 @@ class PolicyEngine:
         parsed = urlparse(url)
         scope = self.config.get("scope", {})
         hostname = parsed.hostname or ""
-        if parsed.scheme not in {"http", "https"}:
+        if parsed.scheme not in {"http", "https", "ws", "wss"}:
+            # ws/wss added for U11's generic WebSocket transport -- without
+            # them, every WebSocket target would fail Executor's own
+            # Policy-Before-Request check regardless of scope config.
             return PolicyDecision(False, "unsupported URL scheme", metadata={"scheme": parsed.scheme})
 
         denied_domains = scope.get("deny_domains", [])
