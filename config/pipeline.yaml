@@ -6,6 +6,9 @@ profiles:
       timeout_seconds: 10
       max_attempts: 1
       retry_backoff_seconds: 0
+    reproduction:
+      attempts: 1
+      threshold: 1
   llm:
     testcase_limit: 25
     judges: [rule, canary, regex, semantic]
@@ -13,3 +16,6 @@ profiles:
       timeout_seconds: 20
       max_attempts: 2
       retry_backoff_seconds: 0.25
+    reproduction:
+      attempts: 5
+      threshold: 3

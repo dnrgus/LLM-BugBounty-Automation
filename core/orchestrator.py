@@ -19,6 +19,7 @@ from executor.runner import Executor
 from judges.ensemble import JudgeEnsemble
 from reporting.reporter import write_markdown_report
 from reporting.sanitizer import sanitize_artifact
+from reproduction.reproducer import Reproducer
 from scope.policy import PolicyEngine
 from storage.artifacts import write_json_artifact
 from storage.sqlite import SQLiteStore
@@ -72,8 +73,10 @@ async def run_sample_pipeline(
 
     executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
     judges = JudgeEnsemble.default()
+    reproducer = Reproducer(target=target, judges=judges)
     findings: list[Finding] = []
     reports: list[str] = []
+    reproduction_summary = {"confirmed": 0, "unstable": 0, "rejected": 0}
 
     for case in selected:
         store.insert_testcase(
@@ -122,21 +125,25 @@ async def run_sample_pipeline(
         sanitized = sanitize_artifact(raw_path, Path("evidence/sanitized"))
         evidence = store.record_evidence(run.id, "llm_response", sanitized)
         if judgement.passed:
+            reproduction = await reproducer.reproduce(case, session_prefix=f"{run.id}:{case.id}")
             finding = Finding(
                 run_id=run.id,
                 testcase_id=case.id,
                 title=case.name,
                 category=case.category,
-                status=FindingStatus.CANDIDATE,
+                status=reproduction.status,
                 confidence=judgement.score,
                 severity=case.severity.get("base", "medium"),
                 evidence_ref=evidence.id,
             )
             store.insert_finding(finding)
-            findings.append(finding)
-            report = write_markdown_report(Path("reports/shareable"), run, case, finding, judgement, sanitized)
-            store.record_report(run.id, report)
-            reports.append(str(report))
+            store.insert_reproduction(reproduction.to_record(finding.id))
+            reproduction_summary[finding.status.value] = reproduction_summary.get(finding.status.value, 0) + 1
+            if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}:
+                findings.append(finding)
+                report = write_markdown_report(Path("reports/shareable"), run, case, finding, judgement, sanitized)
+                store.record_report(run.id, report)
+                reports.append(str(report))
 
     return {
         "run_id": run.id,
@@ -148,4 +155,5 @@ async def run_sample_pipeline(
         "coverage": coverage_summary(
             build_coverage_matrix(testcases, capabilities, {case.id for case in selected})
         ),
+        "reproductions": reproduction_summary,
     }

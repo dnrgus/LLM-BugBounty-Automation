@@ -17,6 +17,7 @@ def test_sample_pipeline_creates_candidate(tmp_path: Path) -> None:
     )
     assert result["finding_count"] == 1
     assert result["reports"]
+    assert result["reproductions"]["confirmed"] == 1
 
 
 def test_sample_pipeline_accepts_fake_agent(tmp_path: Path) -> None:
