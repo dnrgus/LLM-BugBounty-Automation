@@ -15,6 +15,7 @@ from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.budget import AttackBudget
 from core.fingerprint import build_environment_fingerprint
+from core.models import Run
 from core.orchestrator import (
     run_adaptive_pipeline,
     run_full_pipeline,
@@ -24,14 +25,18 @@ from core.orchestrator import (
 )
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
+from executor.runner import Executor
 from hybrid.correlate import correlate_source_and_live
 from judges.benchmark import load_benchmark_cases, run_benchmark
+from judges.ensemble import JudgeEnsemble
 from live.auto_profile import auto_profile_candidates
 from live.classify import classify_items
 from live.discovery import discover_target
 from packs.runner import run_selected_packs
 from packs.selector import select_packs
 from recon.pipeline import build_asset_map
+from scenario.executor import run_scenario
+from scenario.loader import load_scenarios
 from source.audit import audit_source
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
@@ -43,6 +48,7 @@ from testcase.selector import select_executable_testcases
 
 DEFAULT_SCOPE = Path("config/scope.example.yaml")
 DEFAULT_TESTCASES = Path("testcase/suites/basic.yaml")
+DEFAULT_SCENARIOS = Path("scenario/suites/basic.yaml")
 DEFAULT_JUDGE_BENCHMARK = Path("benchmarks/judge/baseline.json")
 DEFAULT_TOOLS = Path("config/tools.yaml")
 DEFAULT_PIPELINE_CONFIG = Path("config/pipeline.yaml")
@@ -279,6 +285,30 @@ def cmd_correlate(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _run_scenarios(args: argparse.Namespace) -> list[dict[str, object]]:
+    policy = PolicyEngine.from_yaml(args.scope)
+    store = SQLiteStore(args.db)
+    store.initialize()
+    scenarios = load_scenarios(args.scenarios)
+    target = create_target(args.target, args.target_config)
+    target_metadata = await target.metadata()
+    executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
+    judges = JudgeEnsemble.default()
+
+    results = []
+    for scenario in scenarios:
+        run = Run(target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint=f"scenario:{scenario.id}")
+        store.insert_run(run)
+        result = await run_scenario(scenario, run, executor, judges, store, target_url=target_metadata.base_url)
+        results.append(result.to_dict())
+    return results
+
+
+def cmd_run_scenario(args: argparse.Namespace) -> int:
+    print(_json(asyncio.run(_run_scenarios(args))))
+    return 0
+
+
 def cmd_recon(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
@@ -498,6 +528,21 @@ def build_parser() -> argparse.ArgumentParser:
     correlate.add_argument("--max-pages", type=int, default=5)
     correlate.add_argument("--max-files", type=int, default=2000)
     correlate.set_defaults(func=cmd_correlate)
+
+    run_scenario_cmd = sub.add_parser(
+        "run-scenario",
+        help="U9 Scenario Engine: run a multi-turn/cross-session Scenario suite against a target "
+        "(runs alongside the normal `sample-run`/`scan` single-testcase path, not in place of it)",
+    )
+    run_scenario_cmd.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    run_scenario_cmd.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
+    run_scenario_cmd.add_argument("--db", type=Path, default=Path("runs/scenario.sqlite"))
+    run_scenario_cmd.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
+    run_scenario_cmd.add_argument(
+        "--target-config", type=Path, default=None,
+        help="Required for --target openai; ignored for the fake targets",
+    )
+    run_scenario_cmd.set_defaults(func=cmd_run_scenario)
 
     discover = sub.add_parser(
         "discover",

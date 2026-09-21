@@ -34,6 +34,7 @@ packages = [
   "hybrid",
   "live",
   "packs",
+  "scenario",
   "findings",
   "recon",
   "rag_harness",
