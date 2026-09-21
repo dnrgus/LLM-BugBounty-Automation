@@ -15,6 +15,20 @@ def test_coverage_entry_tracks_framework_tags() -> None:
     assert row.executed_testcase_ids == ["LLM-PI-001"]
 
 
+def test_testcase_validation_rejects_unknown_session_strategy() -> None:
+    case = Testcase(
+        id="BROKEN",
+        name="Broken",
+        category="prompt_injection",
+        requires=["chat"],
+        prompt="hello",
+        judges=["rule"],
+        session_strategy="not_a_real_strategy",
+    )
+    with pytest.raises(ValueError, match="session_strategy"):
+        case.validate()
+
+
 def test_testcase_validation_requires_judges() -> None:
     case = Testcase(
         id="BROKEN",

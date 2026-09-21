@@ -178,6 +178,23 @@ def _cluster_and_report(run: Run, findings: list[Finding], reports: list[str]) -
     return [cluster.to_dict() for cluster in clusters]
 
 
+def _session_id_for(run: Run, target_id: str, case: Testcase) -> str | None:
+    """Design doc section 8.2 Session Strategy. Returns None for the default
+    per_testcase isolation (Executor then falls back to session_for_trace,
+    i.e. one fresh session per execute() call). shared_suite scopes a
+    session to (run, category) so a themed group of testcases in the same
+    run can build on each other's state; persistent scopes it to (target,
+    category) only, so it's stable across separate runs against the same
+    target -- for long-lived memory/persistence testing, used sparingly per
+    the doc's own guidance.
+    """
+    if case.session_strategy == "shared_suite":
+        return f"{run.id}:{case.category}"
+    if case.session_strategy == "persistent":
+        return f"persistent:{target_id}:{case.category}"
+    return None
+
+
 async def _process_case(
     run: Run,
     case: Testcase,
@@ -219,6 +236,7 @@ async def _process_case(
         trace=trace,
         testcase=case,
         url=target_metadata.base_url,
+        session_id=_session_id_for(run, target_metadata.id, case),
     )
     store.insert_response(
         ResponseRecord(
