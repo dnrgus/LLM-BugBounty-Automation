@@ -10,6 +10,7 @@ from core.models import (
     Endpoint,
     Evidence,
     Finding,
+    FindingStatus,
     Judgement,
     MutationRecord,
     PromptRecord,
@@ -371,6 +372,27 @@ class SQLiteStore:
                 "insert into findings values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref)",
                 data,
             )
+
+    def list_findings(self, run_ids: list[str]) -> list[Finding]:
+        if not run_ids:
+            return []
+        placeholders = ",".join("?" for _ in run_ids)
+        with self.connect() as conn:
+            rows = conn.execute(f"select * from findings where run_id in ({placeholders})", run_ids).fetchall()
+        return [
+            Finding(
+                id=row["id"],
+                run_id=row["run_id"],
+                testcase_id=row["testcase_id"],
+                title=row["title"],
+                category=row["category"],
+                status=FindingStatus(row["status"]),
+                confidence=row["confidence"],
+                severity=row["severity"],
+                evidence_ref=row["evidence_ref"],
+            )
+            for row in rows
+        ]
 
     def insert_reproduction(self, reproduction: Reproduction) -> None:
         data = asdict(reproduction)

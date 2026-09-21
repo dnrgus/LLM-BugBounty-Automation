@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from pathlib import Path
 
+from adapters.discovery.ffuf import FfufAdapter
+from adapters.discovery.katana import KatanaAdapter
 from adapters.llm.pyrit import PyRITAdapter
+from adapters.recon.httpx import HttpxAdapter
+from adapters.recon.subfinder import SubfinderAdapter
+from adapters.scanner.dalfox import DalfoxAdapter
+from adapters.scanner.nuclei import NucleiAdapter
+from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
 from core.fingerprint import build_environment_fingerprint
@@ -17,11 +24,14 @@ from core.models import (
     StoredTestcase,
     Target,
     Trace,
+    new_id,
 )
+from core.profile import PipelineProfile
 from executor.runner import Executor
 from findings.dedup import cluster_findings
 from findings.report import write_cluster_report
 from judges.ensemble import JudgeEnsemble
+from recon.pipeline import build_asset_map
 from reporting.evidence import write_evidence_bundle
 from reporting.reporter import write_json_report, write_markdown_report
 from reproduction.reproducer import Reproducer
@@ -39,11 +49,14 @@ async def run_sample_pipeline(
     testcases: list[Testcase],
     store: SQLiteStore,
     target_kind: str = "fake-llm",
+    profile: PipelineProfile | None = None,
 ) -> dict[str, object]:
     target = create_target(target_kind)
     capabilities = await target.capabilities()
     target_metadata = await target.metadata()
     selected = select_executable_testcases(testcases, capabilities, policy)
+    if profile is not None:
+        selected = selected[: profile.testcase_limit]
     fingerprint = build_environment_fingerprint(
         {
             "target_build": target_metadata.kind,
@@ -76,16 +89,28 @@ async def run_sample_pipeline(
     )
     store.insert_run(run)
 
-    executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
-    judges = JudgeEnsemble.default()
-    reproducer = Reproducer(target=target, judges=judges)
-    mutation_engine = MutationEngine()
+    executor = Executor(
+        policy=policy,
+        target=target,
+        store=store,
+        target_id=target_metadata.id,
+        options=profile.executor if profile is not None else None,
+    )
+    judges = JudgeEnsemble(profile.judges) if profile is not None else JudgeEnsemble.default()
+    reproducer = Reproducer(
+        target=target,
+        judges=judges,
+        default_attempts=profile.reproduction_attempts if profile is not None else 1,
+        default_threshold=profile.reproduction_threshold if profile is not None else None,
+    )
+    mutation_engine = MutationEngine(strategies=profile.mutation_strategies) if profile is not None else MutationEngine()
     findings: list[Finding] = []
     reports: list[str] = []
     reproduction_summary = {"confirmed": 0, "unstable": 0, "rejected": 0}
+    mutation_allowed = profile is None or profile.mutation_enabled
 
     for case in selected:
-        if case.mutation.get("enabled", False):
+        if case.mutation.get("enabled", False) and mutation_allowed:
             for mutation in mutation_engine.mutate(case):
                 store.insert_mutation(mutation.to_record())
         await _process_case(
@@ -330,3 +355,95 @@ async def run_adaptive_pipeline(
         "reproductions": reproduction_summary,
         "clusters": clusters,
     }
+
+
+_EXTERNAL_SCAN_ADAPTERS = {
+    "nuclei": NucleiAdapter,
+    "dalfox": DalfoxAdapter,
+    "trufflehog": TruffleHogAdapter,
+}
+
+
+def _normalize_external_scan(inputs: dict[str, Path | str | None]) -> dict[str, object]:
+    summary: dict[str, object] = {}
+    for tool, adapter_cls in _EXTERNAL_SCAN_ADAPTERS.items():
+        path = inputs.get(tool)
+        if path is None:
+            continue
+        results = adapter_cls().parse_file(path, run_id=new_id("run"), target_id="external_scan")
+        summary[tool] = {"count": len(results), "findings": [result.to_dict() for result in results]}
+    return summary
+
+
+async def run_full_pipeline(
+    policy: PolicyEngine,
+    testcases: list[Testcase],
+    store: SQLiteStore,
+    profile: PipelineProfile,
+    recon_inputs: dict[str, Path | str | None] | None = None,
+    pyrit_input: Path | str | None = None,
+    external_inputs: dict[str, Path | str | None] | None = None,
+) -> dict[str, object]:
+    """Ties scope/policy -> recon -> classify -> scan -> judge -> reproduce ->
+    dedup -> report into a single run, gated by the active profile's stages.
+    """
+    store.initialize()
+    result: dict[str, object] = {"profile": profile.name, "stages": profile.stages}
+
+    if "recon" in profile.stages and recon_inputs:
+        result["recon"] = build_asset_map(
+            policy,
+            store,
+            run_id=new_id("run"),
+            target_id="recon",
+            subfinder_input=recon_inputs.get("subfinder"),
+            httpx_input=recon_inputs.get("httpx"),
+            katana_input=recon_inputs.get("katana"),
+            ffuf_input=recon_inputs.get("ffuf"),
+        )
+
+    scan_run_ids: list[str] = []
+    scan_results: dict[str, object] = {}
+    if "scan" in profile.stages:
+        for target_kind in profile.targets:
+            pipeline_result = await run_sample_pipeline(policy, testcases, store, target_kind=target_kind, profile=profile)
+            scan_results[target_kind] = pipeline_result
+            scan_run_ids.append(str(pipeline_result["run_id"]))
+    result["scan"] = scan_results
+
+    if "adaptive" in profile.stages and pyrit_input:
+        adaptive_target = profile.targets[0] if profile.targets else "fake-llm"
+        adaptive_result = await run_adaptive_pipeline(policy, testcases, store, pyrit_input, target_kind=adaptive_target)
+        result["adaptive"] = adaptive_result
+        scan_run_ids.append(str(adaptive_result["run_id"]))
+
+    if "external_scan" in profile.stages and external_inputs:
+        result["external_scan"] = _normalize_external_scan(external_inputs)
+
+    all_reports: list[str] = []
+    for pipeline_result in scan_results.values():
+        all_reports.extend(pipeline_result["reports"])
+    if "adaptive" in result:
+        all_reports.extend(result["adaptive"]["reports"])
+
+    combined_findings = (
+        [
+            finding
+            for finding in store.list_findings(scan_run_ids)
+            if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}
+        ]
+        if scan_run_ids
+        else []
+    )
+    if combined_findings:
+        clusters = cluster_findings(combined_findings)
+        combined_run = Run(target_id="full", policy_hash=policy.policy_hash, fingerprint="combined")
+        report_path = write_cluster_report(Path("reports/shareable"), combined_run, clusters)
+        all_reports.append(str(report_path))
+        result["combined_clusters"] = [cluster.to_dict() for cluster in clusters]
+    else:
+        result["combined_clusters"] = []
+
+    result["reports"] = all_reports
+    result["finding_count"] = len(combined_findings)
+    return result
