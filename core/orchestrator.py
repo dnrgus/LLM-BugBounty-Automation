@@ -13,6 +13,7 @@ from attack_surface.models import AttackSurfaceItem
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
 from core.budget import AttackBudget
+from core.checkpoint import compute_config_fingerprint
 from core.fingerprint import build_environment_fingerprint
 from core.models import (
     Finding,
@@ -46,6 +47,7 @@ from scenario.models import Scenario, ScenarioStep
 from scenario.reproducer import reproduce_scenario_finding
 from scope.policy import PolicyEngine
 from source.audit import collect_source_items
+from storage.run_state import ResumeDecision, RunStateStore
 from storage.sqlite import SQLiteStore
 from targets.base import TargetMetadata
 from targets.errors import TargetError
@@ -65,7 +67,19 @@ async def run_sample_pipeline(
     target_kind: str = "fake-llm",
     profile: PipelineProfile | None = None,
     target_config: Path | str | None = None,
+    resume_run_id: str | None = None,
 ) -> dict[str, object]:
+    """resume_run_id (P3.4-1, roadmap v3.4.0 Production Hardening): opt-in
+    only. When given, this call reuses that exact run_id (instead of a
+    fresh one) and checks storage/run_state.py for previously completed
+    testcase ids under it -- skipping them instead of re-executing
+    against the target, and rejecting the call outright
+    (ConfigFingerprintMismatchError) if the configuration (policy,
+    target, profile, selected testcases) differs from what that run_id
+    started with. Omitting it (the default) is completely unchanged
+    from before this parameter existed: a fresh run_id every call, no
+    run_state involved.
+    """
     target = create_target(target_kind, target_config)
     capabilities = await target.capabilities()
     target_metadata = await target.metadata()
@@ -87,12 +101,28 @@ async def run_sample_pipeline(
             "policy_hash": policy.policy_hash,
         }
     )
+    store.initialize()
+
+    run_state_store: RunStateStore | None = None
+    resume_decision: ResumeDecision | None = None
+    if resume_run_id is not None:
+        run_state_store = RunStateStore(store)
+        config_fingerprint = compute_config_fingerprint(
+            {
+                "policy_hash": policy.policy_hash,
+                "target_kind": target_kind,
+                "profile_name": profile.name if profile is not None else None,
+                "selected_testcases": sorted(f"{case.id}:{case.content_hash}" for case in selected),
+            }
+        )
+        resume_decision = run_state_store.start_or_resume(resume_run_id, config_fingerprint)
+
     run = Run(
         target_id=target_metadata.id,
         policy_hash=policy.policy_hash,
         fingerprint=fingerprint["fingerprint"],
+        **({"id": resume_run_id} if resume_run_id is not None else {}),
     )
-    store.initialize()
     store.insert_target(
         Target(
             id=target_metadata.id,
@@ -133,7 +163,11 @@ async def run_sample_pipeline(
     consecutive_target_errors = 0
     executed_testcases: list[str] = []
 
+    completed_step_ids = resume_decision.completed_step_ids if resume_decision is not None else frozenset()
     for case in selected:
+        if case.id in completed_step_ids:
+            executed_testcases.append(case.id)
+            continue
         decision = budget.check(category=case.category)
         if not decision.allowed:
             break
@@ -156,19 +190,36 @@ async def run_sample_pipeline(
             )
             executed_testcases.append(case.id)
             consecutive_target_errors = 0
+            if run_state_store is not None:
+                run_state_store.mark_step_completed(run.id, case.id)
         except TargetError:
             consecutive_target_errors += 1
             if consecutive_target_errors >= _MAX_CONSECUTIVE_TARGET_ERRORS:
                 budget.stop_reason = "repeated_target_errors"
                 break
+    else:
+        if run_state_store is not None:
+            run_state_store.mark_run_completed(run.id)
 
-    clusters = _cluster_and_report(run, findings, reports)
+    if resume_decision is not None and resume_decision.completed_step_ids:
+        # Cumulative across every invocation under this run_id, not just
+        # the findings/reports this particular call produced.
+        reportable_findings = [
+            finding
+            for finding in store.list_findings([run.id])
+            if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}
+        ]
+        reports = store.list_reports(run.id)
+    else:
+        reportable_findings = findings
+
+    clusters = _cluster_and_report(run, reportable_findings, reports)
 
     return {
         "run_id": run.id,
         "selected_testcases": [case.id for case in selected],
         "executed_testcases": executed_testcases,
-        "finding_count": len(findings),
+        "finding_count": len(reportable_findings),
         "reports": reports,
         "fingerprint": run.fingerprint,
         "target": target_metadata.id,

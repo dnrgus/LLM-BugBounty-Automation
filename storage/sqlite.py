@@ -222,9 +222,14 @@ class SQLiteStore:
             )
 
     def insert_run(self, run: Run) -> None:
+        # P3.4-1: "insert or ignore" makes re-inserting the same Run (a
+        # resumed run reuses its run_id across process restarts) an
+        # idempotent no-op instead of an integrity-constraint error --
+        # never a behavior change for a fresh run.id, which is never
+        # inserted twice.
         with self.connect() as conn:
             conn.execute(
-                "insert into runs values (:id, :target_id, :policy_hash, :fingerprint, :created_at)",
+                "insert or ignore into runs values (:id, :target_id, :policy_hash, :fingerprint, :created_at)",
                 asdict(run),
             )
 
@@ -474,3 +479,11 @@ class SQLiteStore:
                 conn.execute("insert into reports(run_id, path) values (?, ?)", (run_id, str(path)))
                 return
             conn.execute("insert into reports values (:id, :run_id, :path, :kind)", asdict(report))
+
+    def list_reports(self, run_id: str) -> list[str]:
+        """P3.4-1: lets a resumed run report every report path ever
+        recorded under this run_id, cumulative across process restarts,
+        not just the ones this particular invocation wrote."""
+        with self.connect() as conn:
+            rows = conn.execute("select path from reports where run_id = ?", (run_id,)).fetchall()
+        return [row["path"] for row in rows]
