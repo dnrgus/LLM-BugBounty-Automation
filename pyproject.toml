@@ -19,6 +19,15 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.6",
 ]
+# P3.2-2 (roadmap v3.2.0 Source Intelligence): optional, same pattern as
+# Playwright for the browser adapter -- module import always works, real
+# JS/TS AST parsing needs this installed, a clear per-file fallback to the
+# regex extractor otherwise (source/parsers/javascript.py).
+jsts = [
+  "tree-sitter>=0.21",
+  "tree-sitter-javascript>=0.21",
+  "tree-sitter-typescript>=0.21",
+]
 
 [tool.setuptools]
 py-modules = ["cli", "main"]
@@ -43,10 +52,13 @@ packages = [
   "recon",
   "rag_harness",
   "source",
+  "source.parsers",
+  "source.frameworks",
   "scope",
   "targets",
   "testcase",
   "executor",
+  "tools",
   "traces",
   "judges",
   "storage",
