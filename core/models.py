@@ -223,6 +223,13 @@ class Finding:
     confidence: float
     severity: str
     evidence_ref: str
+    # P3.1-2 (roadmap v3.1.0): "single" (default, the original per-testcase
+    # path) or "scenario" -- a scenario-origin finding's spec is a
+    # self-contained snapshot (scenario_id/step_id/steps) so `reproduce
+    # <finding-id>` can replay it later without needing the original
+    # --scenarios YAML file, the same way single findings replay the exact
+    # stored prompt rather than whatever the current suite file contains.
+    reproduction_spec: dict[str, Any] = field(default_factory=lambda: {"type": "single"})
     id: str = field(default_factory=lambda: new_id("finding"))
 
 

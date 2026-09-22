@@ -27,6 +27,8 @@ from core.orchestrator import (
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from executor.runner import Executor
+from findings.dedup import cluster_findings
+from findings.report import write_cluster_report
 from hybrid.correlate import correlate_source_and_live
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from judges.ensemble import JudgeEnsemble
@@ -37,6 +39,7 @@ from packs.runner import run_selected_packs
 from packs.selector import select_packs
 from recon.pipeline import build_asset_map
 from scenario.executor import run_scenario
+from scenario.finding import promote_scenario_result
 from scenario.loader import load_scenarios
 from source.audit import audit_source
 from scope.policy import PolicyEngine
@@ -286,7 +289,7 @@ def cmd_correlate(args: argparse.Namespace) -> int:
     return 0
 
 
-async def _run_scenarios(args: argparse.Namespace) -> list[dict[str, object]]:
+async def _run_scenarios(args: argparse.Namespace) -> dict[str, object]:
     policy = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
     store.initialize()
@@ -297,12 +300,38 @@ async def _run_scenarios(args: argparse.Namespace) -> list[dict[str, object]]:
     judges = JudgeEnsemble.default()
 
     results = []
+    all_findings = []
     for scenario in scenarios:
         run = Run(target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint=f"scenario:{scenario.id}")
         store.insert_run(run)
         result = await run_scenario(scenario, run, executor, judges, store, target_url=target_metadata.base_url)
-        results.append(result.to_dict())
-    return results
+        # P3.1-2: promote every flagged step into a first-class, individually
+        # reproducible Finding (see scenario/finding.py) instead of leaving
+        # scenario results outside the normal Finding/Evidence lifecycle.
+        findings = promote_scenario_result(scenario, result, store)
+        all_findings.extend(findings)
+        payload = result.to_dict()
+        payload["findings"] = [
+            {"finding_id": finding.id, "step_id": finding.reproduction_spec["step_id"], "category": finding.category}
+            for finding in findings
+        ]
+        results.append(payload)
+
+    report_path = None
+    if all_findings:
+        clusters = cluster_findings(all_findings)
+        combined_run = Run(target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint="scenario_combined")
+        report_path = str(write_cluster_report(Path("reports/shareable"), combined_run, clusters))
+        cluster_payload = [cluster.to_dict() for cluster in clusters]
+    else:
+        cluster_payload = []
+
+    return {
+        "scenarios": results,
+        "finding_count": len(all_findings),
+        "clusters": cluster_payload,
+        "report": report_path,
+    }
 
 
 def cmd_run_scenario(args: argparse.Namespace) -> int:

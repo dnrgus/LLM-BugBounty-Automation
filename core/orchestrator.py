@@ -40,6 +40,8 @@ from reporting.evidence import write_evidence_bundle
 from reporting.reporter import write_json_report, write_markdown_report
 from reproduction.minimal_poc import minimize_poc
 from reproduction.reproducer import Reproducer
+from scenario.models import Scenario, ScenarioStep
+from scenario.reproducer import reproduce_scenario_finding
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.base import TargetMetadata
@@ -627,6 +629,67 @@ async def run_profile_target(
     return profile.to_dict()
 
 
+async def _reproduce_scenario_finding(
+    policy: PolicyEngine,
+    store: SQLiteStore,
+    finding: Finding,
+    target_kind: str,
+    target_config: Path | str | None,
+    minimize: bool,
+) -> dict[str, object]:
+    """P3.1-2 (roadmap v3.1.0 Operational Pipeline): `reproduce`'s branch
+    for a scenario-origin Finding. The Finding's reproduction_spec is a
+    self-contained snapshot of the scenario (see scenario/finding.py), so
+    this never needs the original --scenarios YAML file back.
+    """
+    spec = finding.reproduction_spec
+    scenario = Scenario(
+        id=spec["scenario_id"],
+        name=spec.get("scenario_name", spec["scenario_id"]),
+        steps=[ScenarioStep(**step) for step in spec["steps"]],
+        description=spec.get("scenario_description", ""),
+    )
+    step_id = spec["step_id"]
+
+    target = create_target(target_kind, target_config)
+    target_metadata = await target.metadata()
+    judges = JudgeEnsemble.default()
+    executor = Executor(policy=policy, target=target, store=store, target_id=target_metadata.id)
+
+    store.initialize()
+    run = Run(target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint=f"reproduce_scenario:{finding.id}")
+    control_run = Run(
+        target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint=f"reproduce_scenario_control:{finding.id}"
+    )
+    store.insert_run(run)
+    store.insert_run(control_run)
+
+    outcome = await reproduce_scenario_finding(scenario, step_id, executor, judges, store, run, control_run, target_metadata.base_url)
+
+    result: dict[str, object] = {
+        "finding_id": finding.id,
+        "testcase_id": finding.testcase_id,
+        "original_status": finding.status.value,
+        "reproduction": {
+            "type": "scenario",
+            "scenario_id": outcome.scenario_id,
+            "step_id": outcome.step_id,
+            "attack_passed": outcome.attack_passed,
+            "control_passed": outcome.control_passed,
+            "status": outcome.status.value,
+        },
+        "scenario_result": outcome.result.to_dict(),
+        "control_result": outcome.control_result.to_dict(),
+    }
+    if minimize:
+        # Segment-removal minimization (reproduction/minimal_poc.py) is
+        # defined for a single prompt, not a multi-step/multi-session
+        # scenario -- reported explicitly rather than silently ignored.
+        result["minimal_poc"] = None
+        result["minimal_poc_note"] = "minimization is not yet supported for scenario findings"
+    return result
+
+
 async def run_reproduce_finding(
     policy: PolicyEngine,
     testcases: list[Testcase],
@@ -650,6 +713,9 @@ async def run_reproduce_finding(
     finding = store.get_finding(finding_id)
     if finding is None:
         raise ValueError(f"finding not found: {finding_id}")
+
+    if finding.reproduction_spec.get("type") == "scenario":
+        return await _reproduce_scenario_finding(policy, store, finding, target_kind, target_config, minimize)
 
     base_id = base_testcase_id(finding.testcase_id)
     base_case = next((case for case in testcases if case.id == base_id), None)
