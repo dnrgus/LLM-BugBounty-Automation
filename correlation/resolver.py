@@ -49,6 +49,10 @@ def strip_version_prefix(path: str) -> str:
     return _VERSION_PREFIX_RE.sub("", path) or "/"
 
 
+def _last_segment(canonical_path: str) -> str:
+    return canonical_path.rsplit("/", 1)[-1]
+
+
 @dataclass(frozen=True)
 class EntityMatch:
     """One candidate (source route, live endpoint) pairing. `basis`
@@ -103,19 +107,62 @@ def resolve_entities(source_items: list[AttackSurfaceItem], live_items: list[Att
     method: a source route declaring a non-GET method still matches a
     GET-discovered path, just at reduced confidence (basis explains
     why).
+
+    P3.4-4 (roadmap v3.4.0 Production Hardening): indexed by canonical
+    path (and by last path segment for the proxy-prefix case) instead
+    of a naive O(len(source_items) * len(live_items)) nested scan --
+    a large target can have thousands of routes on each side, and this
+    module's own docstring is the roadmap's explicitly named "quadratic
+    dedup" risk.
     """
+    live_endpoints: list[tuple[AttackSurfaceItem, str]] = []
+    for item in live_items:
+        sig = _endpoint_signature(item)
+        if sig is not None:
+            live_endpoints.append((item, sig[1]))
+
+    live_by_canon: dict[str, list[tuple[AttackSurfaceItem, str]]] = {}
+    live_by_no_version: dict[str, list[tuple[AttackSurfaceItem, str]]] = {}
+    live_by_last_segment: dict[str, list[tuple[AttackSurfaceItem, str]]] = {}
+    for item, live_path in live_endpoints:
+        canon = canonicalize_path(live_path)
+        live_by_canon.setdefault(canon, []).append((item, live_path))
+        live_by_no_version.setdefault(canonicalize_path(strip_version_prefix(live_path)), []).append((item, live_path))
+        live_by_last_segment.setdefault(_last_segment(canon), []).append((item, canon))
+
     matches: list[EntityMatch] = []
     for source_item in source_items:
         source_sig = _endpoint_signature(source_item)
         if source_sig is None:
             continue
-        for live_item in live_items:
-            live_sig = _endpoint_signature(live_item)
-            if live_sig is None:
-                continue
-            match = _match_one(source_item, source_sig, live_item, live_sig)
-            if match is not None:
-                matches.append(match)
+        source_method, source_path = source_sig
+        source_canon = canonicalize_path(source_path)
+        source_no_version = canonicalize_path(strip_version_prefix(source_path))
+        method_caveat = not _accepts_get(source_method)
+        matched_live_ids: set[str] = set()
+
+        for live_item, live_path in live_by_canon.get(source_canon, []):
+            exact = source_path == live_path
+            basis = ["exact_path"] if exact else ["canonicalized_path_match"]
+            confidence = 0.9 if exact else 0.8
+            matches.append(_finalize_match(source_item, live_item, confidence, basis, method_caveat))
+            matched_live_ids.add(live_item.id)
+
+        if source_no_version != source_canon:
+            for live_item, live_path in live_by_no_version.get(source_no_version, []):
+                if live_item.id in matched_live_ids:
+                    continue
+                matches.append(_finalize_match(source_item, live_item, 0.65, ["version_prefix_tolerant_match"], method_caveat))
+                matched_live_ids.add(live_item.id)
+
+        if source_canon != "/":
+            for live_item, live_canon in live_by_last_segment.get(_last_segment(source_canon), []):
+                if live_item.id in matched_live_ids:
+                    continue
+                if live_canon.endswith(source_canon):
+                    matches.append(_finalize_match(source_item, live_item, 0.5, ["proxy_prefix_suffix_match"], method_caveat))
+                    matched_live_ids.add(live_item.id)
+
     return matches
 
 
@@ -131,39 +178,14 @@ def _accepts_get(method: str) -> bool:
     return method in {"GET", "ROUTE", "ANY"} or "GET" in method.split("|")
 
 
-def _match_one(
+def _finalize_match(
     source_item: AttackSurfaceItem,
-    source_sig: tuple[str, str],
     live_item: AttackSurfaceItem,
-    live_sig: tuple[str, str],
-) -> EntityMatch | None:
-    source_method, source_path = source_sig
-    _, live_path = live_sig
-
-    source_canon = canonicalize_path(source_path)
-    live_canon = canonicalize_path(live_path)
-    method_caveat = not _accepts_get(source_method)
-
-    if source_canon == live_canon:
-        basis = ["exact_path"] if source_path == live_path else ["canonicalized_path_match"]
-        confidence = 0.9 if source_path == live_path else 0.8
-        if method_caveat:
-            basis.append("source_declares_non_get_method_live_only_probed_via_get")
-            confidence -= 0.2
-        return EntityMatch(source_item, live_item, max(confidence, 0.3), basis)
-
-    source_no_version = canonicalize_path(strip_version_prefix(source_path))
-    live_no_version = canonicalize_path(strip_version_prefix(live_path))
-    if source_no_version == live_no_version:
-        basis = ["version_prefix_tolerant_match"]
-        if method_caveat:
-            basis.append("source_declares_non_get_method_live_only_probed_via_get")
-        return EntityMatch(source_item, live_item, 0.55 if method_caveat else 0.65, basis)
-
-    if source_canon != "/" and live_canon.endswith(source_canon):
-        basis = ["proxy_prefix_suffix_match"]
-        if method_caveat:
-            basis.append("source_declares_non_get_method_live_only_probed_via_get")
-        return EntityMatch(source_item, live_item, 0.4 if method_caveat else 0.5, basis)
-
-    return None
+    confidence: float,
+    basis: list[str],
+    method_caveat: bool,
+) -> EntityMatch:
+    if method_caveat:
+        basis = [*basis, "source_declares_non_get_method_live_only_probed_via_get"]
+        confidence = max(confidence - 0.2, 0.3)
+    return EntityMatch(source_item, live_item, confidence, basis)

@@ -47,6 +47,7 @@ async def discover_target(
     max_pages: int = 5,
     timeout_seconds: float = 10.0,
     transport: httpx.AsyncBaseTransport | None = None,
+    max_queue_size: int = 1000,
 ) -> DiscoveryResult:
     """LIVE MODE entrypoint (design doc section 6): observation and
     collection only, never vulnerability testing.
@@ -58,9 +59,21 @@ async def discover_target(
     script srcs), is re-validated against Scope/Policy before it is
     fetched; out-of-scope URLs are recorded in skipped_out_of_scope and
     never touched.
+
+    max_queue_size (P3.4-4, roadmap v3.4.0 Production Hardening): only
+    `max_pages` pages are ever *fetched*, but a single large or
+    adversarial page can link to far more URLs than that -- without a
+    cap, `to_visit` would grow without bound purely from queuing links
+    that will never actually be reached. Once the queue hits this size,
+    further newly-discovered links are simply not queued (they're
+    reachable through other means if they matter; this bounds memory,
+    not correctness for a normal-sized target well under the cap). A
+    URL already queued (or visited) is also never queued a second time,
+    which a densely cross-linked site would otherwise do repeatedly.
     """
     result = DiscoveryResult(base_url=base_url)
     to_visit = [base_url]
+    queued: set[str] = {base_url}
     visited: set[str] = set()
 
     async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, transport=transport) as client:
@@ -90,13 +103,17 @@ async def discover_target(
 
             for link in _LINK_RE.findall(text):
                 absolute = urljoin(url, link)
-                if absolute in visited:
+                if absolute in visited or absolute in queued:
                     continue
                 # Scope config, not same-origin-ness, is the sole authority
                 # on whether a discovered link gets followed -- a program's
                 # scope legitimately may span multiple domains/subdomains.
-                if _allow(policy, result, absolute):
-                    to_visit.append(absolute)
+                if not _allow(policy, result, absolute):
+                    continue
+                if len(to_visit) >= max_queue_size:
+                    continue
+                to_visit.append(absolute)
+                queued.add(absolute)
             for script_src in _SCRIPT_RE.findall(text):
                 await _analyze_js(client, policy, result, urljoin(url, script_src))
 

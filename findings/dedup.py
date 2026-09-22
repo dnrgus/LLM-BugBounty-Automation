@@ -75,12 +75,22 @@ def cluster_findings(findings: list[Finding], title_similarity_threshold: float 
     This is a single-pass greedy grouping, not full pairwise clustering, by
     design: v1 only needs exact/heuristic + title-similarity dedup, and
     embedding-based clustering is deferred to v2 (see design doc section 16).
+
+    P3.4-4 (roadmap v3.4.0 Production Hardening): the exact-key case (the
+    common one -- mutation/adaptive variants of the same seed testcase,
+    which is exactly what dominates a large scan's finding volume) is an
+    O(1) dict lookup instead of a linear scan of every bucket seen so
+    far, avoiding this function's own docstring's "quadratic dedup" risk
+    for that path. The title-similarity fallback is still a bounded
+    linear scan -- true sub-quadratic text similarity search is real
+    scope creep here and, per the note above, is v2's job anyway.
     """
     buckets: list[dict[str, object]] = []
+    buckets_by_key: dict[str, dict[str, object]] = {}
 
     for finding in findings:
         exact_key = root_cause_key(finding.category, finding.testcase_id)
-        bucket = next((b for b in buckets if b["key"] == exact_key), None)
+        bucket = buckets_by_key.get(exact_key)
         if bucket is None:
             bucket = next(
                 (
@@ -92,9 +102,12 @@ def cluster_findings(findings: list[Finding], title_similarity_threshold: float 
                 None,
             )
         if bucket is None:
-            buckets.append({"key": exact_key, "category": finding.category, "members": [finding]})
+            bucket = {"key": exact_key, "category": finding.category, "members": [finding]}
+            buckets.append(bucket)
+            buckets_by_key[exact_key] = bucket
         else:
             bucket["members"].append(finding)
+            buckets_by_key.setdefault(exact_key, bucket)
 
     clusters: list[FindingCluster] = []
     for bucket in buckets:
