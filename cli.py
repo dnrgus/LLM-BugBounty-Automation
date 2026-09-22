@@ -111,7 +111,10 @@ def cmd_sample_run(args: argparse.Namespace) -> int:
     engine = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
     result = asyncio.run(
-        run_sample_pipeline(engine, testcases, store, target_kind=args.target, target_config=args.target_config)
+        run_sample_pipeline(
+            engine, testcases, store, target_kind=args.target, target_config=args.target_config,
+            resume_run_id=args.resume_run_id,
+        )
     )
     print(_json(result))
     return 0
@@ -484,6 +487,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-config",
         type=Path,
         help="YAML target config (see config/targets/*.example.yaml); overrides --target",
+    )
+    sample.add_argument(
+        "--resume-run-id", default=None,
+        help="P3.4-1: reuse this run_id and skip its already-completed testcases (from a prior "
+        "invocation against the same --db) instead of a fresh run. Rejects the call if --testcases/"
+        "--target/etc. changed since that run_id was started.",
     )
     sample.set_defaults(func=cmd_sample_run)
 
