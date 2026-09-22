@@ -183,7 +183,8 @@ class SQLiteStore:
                   status text not null,
                   confidence real not null,
                   severity text not null,
-                  evidence_ref text not null
+                  evidence_ref text not null,
+                  reproduction_spec text
                 );
                 create table if not exists evidence (
                   id text primary key,
@@ -371,38 +372,26 @@ class SQLiteStore:
     def insert_finding(self, finding: Finding) -> None:
         data = asdict(finding)
         data["status"] = finding.status.value
+        data["reproduction_spec"] = _json(finding.reproduction_spec)
         with self.connect() as conn:
+            columns = {row["name"] for row in conn.execute("pragma table_info(findings)").fetchall()}
+            if "reproduction_spec" not in columns:
+                data.pop("reproduction_spec")
+                conn.execute(
+                    "insert into findings(id, run_id, testcase_id, title, category, status, confidence, severity, evidence_ref) "
+                    "values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref)",
+                    data,
+                )
+                return
             conn.execute(
-                "insert into findings values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref)",
+                "insert into findings values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref, :reproduction_spec)",
                 data,
             )
 
-    def list_findings(self, run_ids: list[str]) -> list[Finding]:
-        if not run_ids:
-            return []
-        placeholders = ",".join("?" for _ in run_ids)
-        with self.connect() as conn:
-            rows = conn.execute(f"select * from findings where run_id in ({placeholders})", run_ids).fetchall()
-        return [
-            Finding(
-                id=row["id"],
-                run_id=row["run_id"],
-                testcase_id=row["testcase_id"],
-                title=row["title"],
-                category=row["category"],
-                status=FindingStatus(row["status"]),
-                confidence=row["confidence"],
-                severity=row["severity"],
-                evidence_ref=row["evidence_ref"],
-            )
-            for row in rows
-        ]
-
-    def get_finding(self, finding_id: str) -> Finding | None:
-        with self.connect() as conn:
-            row = conn.execute("select * from findings where id = ?", (finding_id,)).fetchone()
-        if row is None:
-            return None
+    def _row_to_finding(self, row: sqlite3.Row, columns: set[str]) -> Finding:
+        reproduction_spec = {"type": "single"}
+        if "reproduction_spec" in columns and row["reproduction_spec"]:
+            reproduction_spec = json.loads(row["reproduction_spec"])
         return Finding(
             id=row["id"],
             run_id=row["run_id"],
@@ -413,7 +402,25 @@ class SQLiteStore:
             confidence=row["confidence"],
             severity=row["severity"],
             evidence_ref=row["evidence_ref"],
+            reproduction_spec=reproduction_spec,
         )
+
+    def list_findings(self, run_ids: list[str]) -> list[Finding]:
+        if not run_ids:
+            return []
+        placeholders = ",".join("?" for _ in run_ids)
+        with self.connect() as conn:
+            columns = {row["name"] for row in conn.execute("pragma table_info(findings)").fetchall()}
+            rows = conn.execute(f"select * from findings where run_id in ({placeholders})", run_ids).fetchall()
+        return [self._row_to_finding(row, columns) for row in rows]
+
+    def get_finding(self, finding_id: str) -> Finding | None:
+        with self.connect() as conn:
+            columns = {row["name"] for row in conn.execute("pragma table_info(findings)").fetchall()}
+            row = conn.execute("select * from findings where id = ?", (finding_id,)).fetchone()
+        if row is None:
+            return None
+        return self._row_to_finding(row, columns)
 
     def get_latest_prompt_text(self, testcase_id: str) -> str | None:
         with self.connect() as conn:
