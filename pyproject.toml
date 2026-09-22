@@ -41,6 +41,7 @@ packages = [
   "attack_surface",
   "attacks",
   "core",
+  "correlation",
   "events",
   "hybrid",
   "live",

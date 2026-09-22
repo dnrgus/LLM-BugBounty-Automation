@@ -66,6 +66,10 @@
 - Source/Sink Lightweight Dataflow (P3.2-3, `source/dataflow/python.py`): request.args/json/form/cookies/headers 같은 실제 소스에서 SQL(`execute`/`query`)·명령 실행(`os.system`/`subprocess.*`)·역직렬화(`pickle`/`yaml.load`)·템플릿 인젝션(`render_template_string`)·파일 접근(`open`)·SSRF(`requests.*`/`httpx.*`)·LLM prompt sink(`ChatCompletion.create` 등, list/dict 리터럴 내부까지 추적)로 실제로 도달하는지를 함수 단위 + 1-hop interprocedural로 추적. 단순 정규식 매치(기존 `_find_sinks`)와 별도로 `asset_type: dataflow`로 file/line 근거가 있는 구체적 증거만 별도 표시
 - Auth/AI Source Intelligence (P3.2-4, `source/auth/python.py`, `source/ai/python.py`): route handler에 `@login_required`/`jwt_required`/`Depends(get_current_user)` 같은 auth guard가 있는지 탐지 — 단, "guard가 안 보임"을 "인증이 없다"로 단정하지 않고 `asset_type: auth`의 evidence-backed candidate(`detected: false` + 명시적 note)로만 출력 (미들웨어/프레임워크 기본값일 수 있음). LLM/RAG/Agent 파일 단위 시그널도 `dynamic_validation_hint` 필드(예: "prompt_injection/system_prompt_leak testcase로 canary 기반 negative control과 비교해서 검증")를 포함해 정적 후보 → 동적 검증으로 이어지는 다음 단계를 명시
 
+**v3.3.0 Static -> Dynamic Validation 진행 중**:
+
+- Static/Live Entity Resolver (P3.3-1, `correlation/resolver.py`): SOURCE의 route와 LIVE에서 관측된 endpoint를 `attack_surface/merge.py`의 정확 일치(exact method+path)보다 안정적으로 매칭 — path parameter를 표기법(Flask `<int:id>`, FastAPI `{id}`, `:id`/`*slug`) 관계없이 하나의 canonical `{param}` 토큰으로 정규화하고, 라이브 쪽의 숫자/UUID 같은 concrete 세그먼트도 같은 토큰으로 정규화해서 매칭. `/v1` 같은 version prefix와 리버스 프록시 prefix(suffix match)도 더 낮은 confidence로 허용. LIVE MODE는 안전을 위해 항상 GET으로만 probe하므로 discovery가 관측한 method는 "실제 허용 메소드"가 아니라 "probe에 쓴 메소드"로 취급 — source가 non-GET을 선언해도 매칭은 되지만 confidence가 낮아지고 근거(`basis`)에 명시됨. 모든 매칭 결과는 confidence 0.6 미만이면 `review_required: true`로 표시되어 자동 공격 대상에서 제외됨 (기존 `correlate` 명령/`merge_items()`의 exact-match 동작은 그대로 유지, 이 resolver는 추가된 상위 레이어)
+
 ## 빠른 시작
 
 ```bash
