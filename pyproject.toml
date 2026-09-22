@@ -70,7 +70,11 @@ packages = [
   "storage",
   "reporting",
   "reproduction",
+  "validation",
 ]
+
+[tool.setuptools.package-data]
+validation = ["templates/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

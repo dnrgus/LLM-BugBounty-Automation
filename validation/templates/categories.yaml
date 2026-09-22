@@ -1,0 +1,40 @@
+# P3.3-2 (roadmap v3.3.0 Static -> Dynamic Validation): per-category
+# validation plan content. validation/planner.py owns the *classification*
+# rule (which category is destructive, which has a live executor, etc);
+# this file only owns the presentation/action text plus what context a
+# category needs, so the two concerns (rule vs. wording) can change
+# independently.
+categories:
+  endpoint:
+    executor: existing_pack_pipeline
+    control_test: "send a benign control request and compare its response against the candidate request's response"
+    success_criteria: "candidate response differs from the control in a way that confirms the finding, not just normal response variance"
+    required_context: []
+  llm:
+    executor: "testcase_suite:llm_core"
+    control_test: "canary-based negative control (same pattern as reproduction/reproducer.py's Reproducer._negative_control_passed)"
+    success_criteria: "prompt_injection/system_prompt_leak testcase confirms via JudgeEnsemble + Reproducer"
+    required_context: []
+  rag:
+    executor: "testcase_suite:rag_injection"
+    control_test: "canary-based negative control"
+    success_criteria: "indirect_injection testcase confirms via JudgeEnsemble + Reproducer"
+    required_context: []
+  agent:
+    executor: "testcase_suite:agent_tool_abuse"
+    control_test: "canary-based negative control"
+    success_criteria: "tool_abuse testcase confirms via JudgeEnsemble + Reproducer"
+    required_context: []
+  auth:
+    control_test: "attempt the route with no credentials and with a real low-privilege account, and compare the two responses"
+    success_criteria: "an unauthenticated or low-privilege request succeeds where the route should have rejected it"
+    required_context: ["authenticated_session"]
+  dataflow_destructive:
+    required_context: ["written_authorization_for_destructive_testing"]
+  dataflow_prompt_injection:
+    control_test: "canary-based negative control, once the correlated endpoint's own 'llm' capability hint plan says executable"
+    success_criteria: "prompt_injection testcase confirms via JudgeEnsemble + Reproducer"
+  dataflow_other: {}
+  secret: {}
+  function: {}
+  parameter: {}
