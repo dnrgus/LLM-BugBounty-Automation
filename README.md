@@ -76,6 +76,7 @@
 **v3.4.0 Production Hardening 진행 중**:
 
 - Checkpoint / Resume (P3.4-1, `core/checkpoint.py`, `storage/run_state.py`): `sample-run --resume-run-id <id>`처럼 `resume_run_id`를 넘기면 그 run_id로 이미 완료된 testcase는 다시 target에 보내지 않고 건너뜀. policy/target/profile/선택된 testcase 내용(hash 포함)으로 만든 config fingerprint가 이전 실행과 다르면 `ConfigFingerprintMismatchError`로 즉시 거부(다른 설정으로 같은 run_id를 재개하는 위험한 상황 차단). `resume_run_id`를 안 주면(기본값) 완전히 기존 동작 그대로 — 매 호출마다 새 run_id 발급. `Run` insert가 idempotent(`insert or ignore`)해져서 같은 run_id를 여러 번 insert해도 에러 없음
+- Cancellation / Backpressure (P3.4-2, `core/cancel.py`): `sample-run` 실행 중 Ctrl-C를 누르면 `CancellationToken`이 세팅되고, 다음 testcase로 넘어가기 전(또는 target 호출 직전)에 협조적으로 확인해서 중단 — 진행 중인 요청을 강제로 끊지 않고 안전하게 멈춤. `resume_run_id`와 함께 쓰면 취소된 run은 `run_state`에 `cancelled`로 기록되고 나중에 그대로 재개 가능(`cancelled`도 재개 가능한 상태). `tools/runner.py`의 외부 툴 실행도 이제 timeout뿐 아니라 명시적 cancel로도 자식 프로세스를 즉시 kill. `Executor`는 scope.yaml의 `limits.concurrency`를 실제로 읽어 동시 실행 수를 제한하는 `BoundedConcurrency`(세마포어)를 적용 — 지금은 순차 실행이라 당장 동작에 영향은 없지만 향후 동시 실행 경로가 생기면 그대로 적용됨
 
 ## 빠른 시작
 

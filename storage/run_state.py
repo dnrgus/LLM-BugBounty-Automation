@@ -99,3 +99,14 @@ class RunStateStore:
                 "update run_state set status = 'completed', updated_at = ? where run_id = ?",
                 (utc_now(), run_id),
             )
+
+    def mark_run_cancelled(self, run_id: str) -> None:
+        """P3.4-2: a cancelled run is still resumable later --
+        start_or_resume() doesn't gate on status, only on the config
+        fingerprint, so resuming it simply flips status back to
+        'in_progress' and continues from its completed_step_ids."""
+        with self.store.connect() as conn:
+            conn.execute(
+                "update run_state set status = 'cancelled', updated_at = ? where run_id = ?",
+                (utc_now(), run_id),
+            )
