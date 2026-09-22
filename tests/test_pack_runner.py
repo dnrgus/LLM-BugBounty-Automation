@@ -1,4 +1,6 @@
 import asyncio
+from pathlib import Path
+from unittest.mock import patch
 
 from core.tool_doctor import ToolStatus
 from packs.registry import AttackPack
@@ -7,6 +9,7 @@ from packs.selector import PackSelection
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from testcase.loader import load_testcases
+from tools.runner import ExternalTool
 
 _TESTCASES = load_testcases("testcase/suites/basic.yaml")
 
@@ -189,3 +192,75 @@ def test_pack_run_result_to_dict_is_json_serializable(tmp_path) -> None:
         run_selected_packs(selections, _TESTCASES, _policy(), store, target_kind="fake-llm")
     )
     json.dumps([r.to_dict() for r in results])
+
+
+def _fixture_nuclei_binary(tmp_path: Path) -> Path:
+    script = tmp_path / "fixture-nuclei"
+    script.write_text(
+        "#!/bin/sh\n"
+        'if [ "$1" = "--version" ]; then echo "fixture-nuclei 1.0.0"; exit 0; fi\n'
+        'echo \'{"template-id": "fixture", "info": {"name": "Fixture", "severity": "high"}, '
+        '"matched-at": "https://ai.example.com/api/"}\'\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    return script
+
+
+def test_run_selected_packs_runs_nuclei_live_when_installed_and_a_live_target_url_is_given(tmp_path) -> None:
+    # P3.1-3: installed + no results file + a live_target_url -> actually
+    # execute (tools/runner.py), instead of only reporting a skip.
+    web_scan_pack = AttackPack(
+        id="web_scan", name="Web Vulnerability Scan", applies_to=("web",),
+        testing_categories=("automated_scanning",), estimated_request_cost=50, tool_ids=("nuclei",),
+    )
+    selections = [PackSelection(web_scan_pack, True, "selected")]
+    store = SQLiteStore(tmp_path / "runner.sqlite")
+
+    def fake_checker(name: str) -> ToolStatus:
+        return ToolStatus(name=name, available=True, path=f"/usr/bin/{name}", version=None, status="ok")
+
+    fixture_binary = _fixture_nuclei_binary(tmp_path)
+    fixture_tool = ExternalTool(
+        id="nuclei",
+        binary=str(fixture_binary),
+        build_command=lambda target: [str(fixture_binary), "-u", target],
+        parse_output=lambda stdout: [
+            __import__("json").loads(line) for line in stdout.splitlines() if line.strip()
+        ],
+        normalizer=__import__("adapters.scanner.nuclei", fromlist=["NucleiAdapter"]).NucleiAdapter(),
+    )
+
+    with patch("packs.runner._LIVE_EXTERNAL_TOOLS", {"nuclei": fixture_tool}):
+        results = asyncio.run(
+            run_selected_packs(
+                selections, _TESTCASES, _policy(), store,
+                tool_checker=fake_checker, live_target_url="https://ai.example.com/api/",
+            )
+        )
+
+    assert len(results) == 1
+    assert results[0].status == "ran"
+    assert results[0].summary["count"] == 1
+
+
+def test_run_selected_packs_without_a_live_target_url_keeps_reporting_no_results_file(tmp_path) -> None:
+    # Backward compatibility: omitting live_target_url (the default) must
+    # behave exactly as it did before P3.1-3.
+    web_scan_pack = AttackPack(
+        id="web_scan", name="Web Vulnerability Scan", applies_to=("web",),
+        testing_categories=("automated_scanning",), estimated_request_cost=50, tool_ids=("nuclei",),
+    )
+    selections = [PackSelection(web_scan_pack, True, "selected")]
+    store = SQLiteStore(tmp_path / "runner.sqlite")
+
+    def fake_checker(name: str) -> ToolStatus:
+        return ToolStatus(name=name, available=True, path=f"/usr/bin/{name}", version=None, status="ok")
+
+    results = asyncio.run(
+        run_selected_packs(selections, _TESTCASES, _policy(), store, tool_checker=fake_checker)
+    )
+
+    assert len(results) == 1
+    assert results[0].status == "skipped_no_results_file"

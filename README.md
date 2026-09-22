@@ -56,6 +56,8 @@
 **v3.1.0 Operational Pipeline 진행 중** (기능 모음을 하나의 실전 운용 파이프라인으로 연결):
 
 - Scan Orchestrator 통합 (P3.1-1, `scan <url>`): LIVE MODE 분석의 단일 진입점. 기존에는 `discover --classify --auto-profile --select-packs --run-packs`를 따로 조합해야 했던 것을, `scan <url>` 한 번으로 discover → classify → (선택) auto-profile → pack 선택 → pack 실행(testcase_suite는 Executor/Judge/Reproducer로, 외부 툴은 결과 파일이 있을 때만) → finding dedup/root cause cluster → report까지 연결. `--profile`을 생략하면 `quick`으로 기본 동작하며, URL을 생략하면 기존 fixture 기반 `--profile` 파이프라인이 그대로(동작 변경 없이) 실행됨
+- Scenario → Finding Lifecycle 연결 (P3.1-2): `run-scenario`가 flag된 각 step을 `reproduction_spec(type=scenario)`을 가진 일반 Finding으로 승격 — scenario 전체(steps/prompts/session_ref)를 spec에 그대로 스냅샷하므로 `reproduce <finding-id>`가 원본 `--scenarios` YAML 없이도 나중에 재현 가능. 재현 시 전체 scenario를 다시 실행하고(step 하나만 격리하면 이전 step이 만든 상태가 사라짐), flag된 step의 prompt만 canary-neutralized/benign 버전으로 바꾼 control replay와 비교하는 control-vs-attack 검증을 거침
+- External ToolRunner 실행 계층 (P3.1-3, `tools/runner.py`): Nuclei/Dalfox가 로컬에 설치돼 있고 결과 파일이 안 주어졌다면(`scan <url>` / `discover --run-packs`), 더 이상 "설치는 됐지만 결과 파일 없음"으로만 멈추지 않고 Policy/Scope 통과한 URL에 대해 실제로 실행 — `subprocess`는 항상 `shell=False`(argv 리스트, 셸 문자열 없음), timeout 시 프로세스를 kill, 실행한 버전을 기록. TruffleHog는 URL fetch 모드가 없어(파일시스템 스캔 전용) 이번 단계에서는 여전히 결과 파일 방식만 지원. 미설치 툴은 여전히 scan 전체를 깨지 않고 `skipped_tool_not_installed`로 기록
 
 ## 빠른 시작
 
@@ -271,7 +273,7 @@ git status --short
 - 스트리밍 응답(SSE/chunked) 미지원 — Executor는 완전한 응답 한 번을 기다렸다가 Judge에 넘기는 동기 모델이라, 스트리밍을 지원하려면 Trace/Judge 파이프라인 전체에 걸친 구조 변경이 필요함
 - Capability는 target config에 선언(`capabilities: {chat: true, ...}`)하는 게 기본이며, `profile` 명령이 실제 probe 요청으로 선언과 실제 동작(현재는 multi-turn 기억 여부)의 불일치를 검증. rag/tools/mcp 같은 항목은 한 번의 probe로 안전하게 자동 판별하기 어려워 여전히 선언 기반
 - Session Strategy: testcase에 `session_strategy: per_testcase|shared_suite|persistent`를 선언 가능. `shared_suite`는 같은 run 안에서 같은 category의 testcase들이 세션을 공유(멀티턴/상태 누적 테스트용), `persistent`는 run이 달라져도 같은 target+category면 세션을 재사용. `cross_session_pair`(A/B 세션 비교)는 우리 실행 모델(testcase 1개 = 실행 1번)에 잘 안 맞아 미구현
-- Promptfoo/Garak/PyRIT/Nuclei/Dalfox/TruffleHog는 실제 CLI를 직접 실행하지 않고, 각 도구가 생성한 JSON/JSONL 출력 파일을 정규화하는 방식만 지원 (Adapter-first 설계 원칙에 따름)
+- Promptfoo/Garak/PyRIT는 여전히 실제 CLI를 직접 실행하지 않고 각 도구가 생성한 JSON/JSONL 출력 파일을 정규화하는 방식만 지원. Nuclei/Dalfox는 P3.1-3부터 `tools/runner.py`를 통해 설치돼 있고 결과 파일이 없으면 실제로 실행됨(Policy/Scope 통과 필수, `shell=False`). TruffleHog는 URL fetch 모드가 없어(파일시스템 스캔 전용, `tools/trufflehog.py`) 여전히 결과 파일 방식만 지원
 - RAG retrieval은 실제 embedding/vector store가 아니라 오프라인 재현성을 위한 결정론적 Jaccard 토큰 overlap으로 근사됨
 - Root Cause Clustering은 단일 패스 greedy 그룹핑이며 pgvector 기반 semantic clustering은 v2 계획 (설계서 22절)
 - Judge는 rule/regex/canary만 구현되어 있고, `llm`/`full` 프로필 설정에 남아있는 `semantic` judge 항목은 아직 미구현 (해당 이름을 사용하는 judge 요청은 조용히 no-op 처리됨)
