@@ -108,8 +108,26 @@ def test_audit_source_produces_expected_attack_surface_shape() -> None:
     assert result["files_scanned"] == 1
 
     surface = result["attack_surface"]
-    assert surface["by_asset_type"] == {"endpoint": 2, "parameter": 2, "function": 1, "secret": 2, "llm": 1}
-    assert surface["total"] == 8
+    # P3.2-3: dataflow tracing finds 2 real source->sink edges in this
+    # fixture -- request.args.get("cmd") -> os.system(cmd), and
+    # request.json.get("message") -> openai.ChatCompletion.create(...,
+    # messages=[{"content": message}]) -- on top of the pre-existing
+    # unconnected input/sink regex matches.
+    assert surface["by_asset_type"] == {
+        "endpoint": 2, "parameter": 2, "function": 1, "secret": 2, "llm": 1, "dataflow": 2,
+    }
+    assert surface["total"] == 10
+
+
+def test_audit_source_dataflow_edges_carry_file_and_line_evidence() -> None:
+    result = audit_source(FIXTURE)
+    dataflow_items = [item for item in result["attack_surface"]["items"] if item["asset_type"] == "dataflow"]
+    sink_types = {item["metadata"]["sink_type"] for item in dataflow_items}
+    assert sink_types == {"os_command", "prompt_injection_sink"}
+    for item in dataflow_items:
+        assert item["metadata"]["file"] == str(FIXTURE / "app.py")
+        assert isinstance(item["metadata"]["line"], int)
+        assert item["evidence_refs"] == [item["location"]]
 
 
 def test_audit_source_flags_dangerous_sink_and_llm_integration() -> None:

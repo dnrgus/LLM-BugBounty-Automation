@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 
 from attack_surface.models import AttackSurfaceItem
+from source.dataflow.python import trace_dataflow
 from source.ingestion import SourceFile
 
 _INPUT_PATTERNS: dict[str, list[re.Pattern[str]]] = {
@@ -67,6 +68,7 @@ def analyze_files(files: list[SourceFile]) -> list[AttackSurfaceItem]:
         items.extend(_find_sinks(source_file, text))
         items.extend(_find_secrets(source_file, text))
         items.extend(_find_llm_integration(source_file, text))
+        items.extend(_find_dataflow_edges(source_file, text))
     return items
 
 
@@ -130,6 +132,36 @@ def _find_secrets(source_file: SourceFile, text: str) -> list[AttackSurfaceItem]
                     evidence_refs=[f"{source_file.path}:{line}"],
                 )
             )
+    return items
+
+
+def _find_dataflow_edges(source_file: SourceFile, text: str) -> list[AttackSurfaceItem]:
+    """P3.2-3 (roadmap v3.2.0 Source Intelligence): Python-only for now
+    (source/dataflow/python.py). A distinct, higher-confidence signal
+    from _find_sinks' plain "this dangerous call exists somewhere in the
+    file" regex match -- this only fires when a request-derived value is
+    actually traced reaching that call, with real source->sink evidence
+    rather than a string-shape guess.
+    """
+    if source_file.language != "python":
+        return []
+    items: list[AttackSurfaceItem] = []
+    for edge in trace_dataflow(source_file.path, text):
+        items.append(
+            AttackSurfaceItem(
+                source_type="source",
+                asset_type="dataflow",
+                location=f"{source_file.path}:{edge.line}",
+                metadata={
+                    "sink_type": edge.sink,
+                    "source": edge.source,
+                    "file": edge.file,
+                    "line": edge.line,
+                },
+                confidence=0.85,
+                evidence_refs=[f"{source_file.path}:{edge.line}"],
+            )
+        )
     return items
 
 
