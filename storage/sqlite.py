@@ -185,7 +185,11 @@ class SQLiteStore:
                   confidence real not null,
                   severity text not null,
                   evidence_ref text not null,
-                  reproduction_spec text
+                  reproduction_spec text,
+                  origin text,
+                  static_candidate_id text,
+                  validation_task_ids text,
+                  validation_status text
                 );
                 create table if not exists evidence (
                   id text primary key,
@@ -402,18 +406,31 @@ class SQLiteStore:
         data = asdict(finding)
         data["status"] = finding.status.value
         data["reproduction_spec"] = _json(finding.reproduction_spec)
+        data["origin"] = _json(finding.origin)
+        data["validation_task_ids"] = _json(finding.validation_task_ids)
         with self.connect() as conn:
             columns = {row["name"] for row in conn.execute("pragma table_info(findings)").fetchall()}
             if "reproduction_spec" not in columns:
-                data.pop("reproduction_spec")
+                for key in ("reproduction_spec", "origin", "static_candidate_id", "validation_task_ids", "validation_status"):
+                    data.pop(key, None)
                 conn.execute(
                     "insert into findings(id, run_id, testcase_id, title, category, status, confidence, severity, evidence_ref) "
                     "values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref)",
                     data,
                 )
                 return
+            if "origin" not in columns:
+                for key in ("origin", "static_candidate_id", "validation_task_ids", "validation_status"):
+                    data.pop(key, None)
+                conn.execute(
+                    "insert into findings(id, run_id, testcase_id, title, category, status, confidence, severity, evidence_ref, reproduction_spec) "
+                    "values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref, :reproduction_spec)",
+                    data,
+                )
+                return
             conn.execute(
-                "insert into findings values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref, :reproduction_spec)",
+                "insert into findings values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, "
+                ":evidence_ref, :reproduction_spec, :origin, :static_candidate_id, :validation_task_ids, :validation_status)",
                 data,
             )
 
@@ -421,6 +438,12 @@ class SQLiteStore:
         reproduction_spec = {"type": "single"}
         if "reproduction_spec" in columns and row["reproduction_spec"]:
             reproduction_spec = json.loads(row["reproduction_spec"])
+        origin = ["dynamic"]
+        if "origin" in columns and row["origin"]:
+            origin = json.loads(row["origin"])
+        validation_task_ids: list[str] = []
+        if "validation_task_ids" in columns and row["validation_task_ids"]:
+            validation_task_ids = json.loads(row["validation_task_ids"])
         return Finding(
             id=row["id"],
             run_id=row["run_id"],
@@ -432,6 +455,10 @@ class SQLiteStore:
             severity=row["severity"],
             evidence_ref=row["evidence_ref"],
             reproduction_spec=reproduction_spec,
+            origin=origin,
+            static_candidate_id=row["static_candidate_id"] if "static_candidate_id" in columns else None,
+            validation_task_ids=validation_task_ids,
+            validation_status=row["validation_status"] if "validation_status" in columns else None,
         )
 
     def list_findings(self, run_ids: list[str]) -> list[Finding]:

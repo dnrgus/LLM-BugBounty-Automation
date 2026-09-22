@@ -22,6 +22,31 @@ def root_cause_key(category: str, testcase_id: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def validation_root_cause_key(validator_type: str, static_candidate_id: str, target_entity: str) -> str:
+    """P4.1-E (roadmap v4.1.0 Dynamic Validation Expansion): a
+    validation-task-originated Finding's testcase_id is a fresh random
+    ValidationTask id every time the same candidate is re-validated
+    against the same target, so root_cause_key's testcase_id-based key
+    would treat every re-run as a brand-new root cause. This key is
+    deterministic across re-runs instead: same static candidate + same
+    target + same validator always dedups together, per the roadmap's
+    own instruction ("Dedup key = candidate fingerprint + target entity
+    + validator_type").
+    """
+    payload = f"validation|{validator_type}|{static_candidate_id}|{target_entity}"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _exact_key(finding: Finding) -> str:
+    if finding.reproduction_spec.get("type") == "validation":
+        return validation_root_cause_key(
+            str(finding.reproduction_spec.get("validator_type", "")),
+            finding.static_candidate_id or "",
+            str(finding.reproduction_spec.get("target_entity", "")),
+        )
+    return root_cause_key(finding.category, finding.testcase_id)
+
+
 def _title_tokens(title: str) -> set[str]:
     return {token.lower() for token in _WORD_RE.findall(title)}
 
@@ -89,9 +114,16 @@ def cluster_findings(findings: list[Finding], title_similarity_threshold: float 
     buckets_by_key: dict[str, dict[str, object]] = {}
 
     for finding in findings:
-        exact_key = root_cause_key(finding.category, finding.testcase_id)
+        exact_key = _exact_key(finding)
+        is_validation_origin = finding.reproduction_spec.get("type") == "validation"
         bucket = buckets_by_key.get(exact_key)
-        if bucket is None:
+        # A validation-origin finding's exact key (candidate + target
+        # entity + validator_type) is already the deterministic
+        # identity the roadmap asks for -- it never falls back to
+        # title-similarity fuzzy matching, which could otherwise merge
+        # two different targets that happen to share a generic title
+        # (e.g. "auth validation: AS-1" probed against two resources).
+        if bucket is None and not is_validation_origin:
             bucket = next(
                 (
                     b

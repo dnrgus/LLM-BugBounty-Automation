@@ -231,6 +231,16 @@ class Finding:
     # stored prompt rather than whatever the current suite file contains.
     reproduction_spec: dict[str, Any] = field(default_factory=lambda: {"type": "single"})
     id: str = field(default_factory=lambda: new_id("finding"))
+    # P4.1-E (roadmap v4.1.0 Dynamic Validation Expansion): first-class
+    # provenance fields, promoted out of reproduction_spec's ad-hoc keys
+    # so a report/CLI can read them without knowing every dict shape.
+    # Optional/default-only, per the Backward-compatible-model charter
+    # rule -- every existing Finding(...) call site (none of which pass
+    # these) keeps producing exactly what it always did.
+    origin: list[str] = field(default_factory=lambda: ["dynamic"])
+    static_candidate_id: str | None = None
+    validation_task_ids: list[str] = field(default_factory=list)
+    validation_status: str | None = None
 
 
 @dataclass(frozen=True)

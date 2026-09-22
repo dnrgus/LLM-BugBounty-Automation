@@ -14,6 +14,47 @@ _STATUS_LABELS = {
     "candidate": "후보",
 }
 
+# P4.1-E (roadmap v4.1.0 Dynamic Validation Expansion): what a CONFIRMED
+# result from each validator type actually means, kept next to the
+# report so "정적 근거/동적 검증" sections never overclaim beyond what
+# the validator itself checked (validation/finding_adapter.py owns the
+# canonical copy of this text; duplicated here only because reporter.py
+# has no other dependency on validation/*).
+_LIMITATIONS_BY_VALIDATOR_TYPE = {
+    "endpoint": "이 검증은 후보 엔드포인트가 실제로 살아있고 도달 가능한지만 확인하며, 그 자체로 취약점을 의미하지 않습니다.",
+    "auth": "명시적으로 제공된 fixture/env/browser-session 인증 컨텍스트 두 개가 동일한 응답 구조를 관측했는지만 확인하며, "
+    "추측하거나 탈취한 자격증명으로부터 도출된 결과가 아닙니다.",
+    "dataflow": "무해한 correlation token이 관측 가능한 지점에 반사(reflect)되었는지만 확인하며, 정적으로 추적된 특정 "
+    "sink에 실제로 도달했다는 의미는 아니고 sink의 실제 payload/동작은 실행되지 않았습니다.",
+}
+
+
+def _static_dynamic_sections(finding: Finding) -> list[str]:
+    """Only emitted when the finding carries static/dynamic provenance
+    (validation/finding_adapter.py or the legacy static-candidate
+    correlation path) -- a plain testcase-driven finding's report is
+    unchanged.
+    """
+    if not finding.static_candidate_id:
+        return []
+    validator_type = str(finding.reproduction_spec.get("validator_type", finding.category))
+    limitation = _LIMITATIONS_BY_VALIDATOR_TYPE.get(validator_type)
+    lines = [
+        "",
+        "## 정적 근거 (Static Evidence)",
+        "",
+        f"- Static Candidate ID: `{finding.static_candidate_id}`",
+        "",
+        "## 동적 검증 (Dynamic Validation)",
+        "",
+        f"- Validator: {validator_type}",
+        f"- Validation Task IDs: {', '.join(finding.validation_task_ids) or '(none)'}",
+        f"- Validation Status: {finding.validation_status or '(none)'}",
+    ]
+    if limitation:
+        lines += ["", "## 제한사항 (Limitations)", "", limitation]
+    return lines
+
 
 def write_markdown_report(
     directory: Path,
@@ -72,6 +113,7 @@ def write_markdown_report(
                 "```json",
                 json.dumps(evidence_metadata or {}, indent=2, sort_keys=True),
                 "```",
+                *_static_dynamic_sections(finding),
             ]
         )
         + "\n",
@@ -117,6 +159,17 @@ def write_json_report(
         },
         "evidence": evidence_metadata,
     }
+    if finding.static_candidate_id:
+        validator_type = str(finding.reproduction_spec.get("validator_type", finding.category))
+        payload["static_evidence"] = {"static_candidate_id": finding.static_candidate_id}
+        payload["dynamic_validation"] = {
+            "validator_type": validator_type,
+            "validation_task_ids": finding.validation_task_ids,
+            "validation_status": finding.validation_status,
+        }
+        limitation = _LIMITATIONS_BY_VALIDATOR_TYPE.get(validator_type)
+        if limitation:
+            payload["limitations"] = limitation
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     return path
 

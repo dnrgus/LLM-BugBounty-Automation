@@ -3,15 +3,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+import httpx
+
 from attack_surface.models import AttackSurfaceItem
 from core.orchestrator import run_sample_pipeline
 from core.profile import PipelineProfile
 from correlation.resolver import EntityMatch
 from findings.correlation import CorrelatedFinding
 from packs.registry import DEFAULT_PACKS
+from reporting.evidence import write_evidence_bundle
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from testcase.schema import Testcase
+from validation.auth_validator import AuthContext, compare_auth_contexts
+from validation.contract import ValidationResult, ValidationStatus, ValidationTask
+from validation.dataflow_validator import DataflowInjectionPoint, validate_dataflow_correlation
+from validation.endpoint_validator import EndpointValidationEvidence, validate_endpoint
+from validation.finding_adapter import finding_from_validation_result
 from validation.planner import ValidationPlan
 
 _PACKS_BY_ID = {pack.id: pack for pack in DEFAULT_PACKS}
@@ -112,3 +120,166 @@ async def run_dynamic_validation(
         f"{len(correlated)} finding(s) produced",
         correlated,
     )
+
+
+def _endpoint_result(task: ValidationTask, evidence: EndpointValidationEvidence, confidence: float) -> ValidationResult:
+    if evidence.blocked:
+        status = ValidationStatus.BLOCKED
+    elif any(observation.status_code is not None for observation in evidence.observations):
+        # A real HTTP response (of any status code) confirms the
+        # candidate correlates to a live, reachable endpoint -- not a
+        # vulnerability verdict, matching EndpointValidationEvidence's
+        # own docstring.
+        status = ValidationStatus.CONFIRMED
+    elif evidence.observations:
+        status = ValidationStatus.REJECTED
+    else:
+        status = ValidationStatus.UNSTABLE
+    return ValidationResult(
+        task_id=task.id, status=status, confidence=confidence,
+        observations=[observation.to_dict() for observation in evidence.observations],
+    )
+
+
+async def run_endpoint_validation(
+    item: AttackSurfaceItem,
+    plan: ValidationPlan,
+    match: EntityMatch,
+    policy: PolicyEngine,
+    store: SQLiteStore,
+    run_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> DynamicValidationOutcome:
+    """P4.1-E (roadmap v4.1.0 Dynamic Validation Expansion): dispatches
+    an "executable" endpoint candidate (item+match already resolved by
+    validation/planner.py + correlation/resolver.py) to
+    endpoint_validator.py, then wraps the result through the 4.1-A
+    ValidationTask/ValidationResult contract into a Finding via
+    finding_from_validation_result.
+    """
+    if plan.classification != "executable" or item.asset_type != "endpoint":
+        return DynamicValidationOutcome(
+            item, plan, "not_run",
+            f"no endpoint executor for classification={plan.classification!r} asset_type={item.asset_type!r}",
+        )
+
+    url = match.live_item.location
+    method = str(item.metadata.get("method", "GET"))
+    evidence = await validate_endpoint(url, method, policy, transport=transport)
+
+    task = ValidationTask(candidate_id=item.id, validator_type="endpoint", status=ValidationStatus.RUNNING)
+    result = _endpoint_result(task, evidence, match.confidence)
+
+    evidence_bundle = write_evidence_bundle(
+        Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{task.id}_endpoint.json", evidence.to_dict()
+    )
+    stored_evidence = store.record_evidence(
+        run_id, "endpoint_validation", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
+    )
+
+    finding = finding_from_validation_result(run_id, task, result, stored_evidence.id, url)
+    if finding is not None:
+        store.insert_finding(finding)
+    correlated = [CorrelatedFinding(finding=finding, static_candidate=item, match=match, plan=plan)] if finding else []
+
+    return DynamicValidationOutcome(item, plan, "ran", f"endpoint validation -> {result.status.value}", correlated)
+
+
+async def run_auth_validation(
+    item: AttackSurfaceItem,
+    match: EntityMatch,
+    policy: PolicyEngine,
+    control: AuthContext,
+    probe: AuthContext,
+    store: SQLiteStore,
+    run_id: str,
+    resource_key: str | None = None,
+    selected_fields: list[str] | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> DynamicValidationOutcome:
+    """P4.1-E: runs the auth-context comparison validator for an "auth"
+    candidate. Unlike endpoint validation, this is never auto-triggered
+    by classification=="executable" -- validation/planner.py
+    deliberately keeps every auth candidate at "review_only" (a real
+    fixture/env/browser-session AuthContext pair must be explicitly
+    supplied by the caller; this project never guesses or brute-forces
+    one), so this function is only reached once a caller already has
+    that context in hand.
+    """
+    url = match.live_item.location
+    method = str(item.metadata.get("method", "GET"))
+    comparison = await compare_auth_contexts(
+        url, method, control, probe, policy, resource_key=resource_key, selected_fields=selected_fields, transport=transport
+    )
+
+    task = ValidationTask(candidate_id=item.id, validator_type="auth", status=ValidationStatus.RUNNING)
+    result = ValidationResult(
+        task_id=task.id, status=comparison.status, confidence=match.confidence,
+        observations=[observation.to_dict() for observation in comparison.observations],
+    )
+
+    evidence_bundle = write_evidence_bundle(
+        Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{task.id}_auth.json", comparison.to_dict()
+    )
+    stored_evidence = store.record_evidence(
+        run_id, "auth_validation", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
+    )
+
+    plan = ValidationPlan(
+        candidate_id=item.id, asset_type=item.asset_type, classification="review_only",
+        reason="auth-context comparison executed with an explicitly supplied context pair",
+    )
+    finding = finding_from_validation_result(run_id, task, result, stored_evidence.id, comparison.resource_key)
+    if finding is not None:
+        store.insert_finding(finding)
+    correlated = [CorrelatedFinding(finding=finding, static_candidate=item, match=match, plan=plan)] if finding else []
+
+    return DynamicValidationOutcome(item, plan, "ran", f"auth comparison -> {result.status.value}", correlated)
+
+
+async def run_dataflow_validation(
+    item: AttackSurfaceItem,
+    policy: PolicyEngine,
+    injection: DataflowInjectionPoint,
+    target_url: str,
+    store: SQLiteStore,
+    run_id: str,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> DynamicValidationOutcome:
+    """P4.1-E: runs the dataflow runtime-correlation validator for a
+    "dataflow" candidate. Like auth, never auto-triggered by
+    classification -- validation/planner.py keeps every dataflow
+    candidate at "review_only", and a concrete injection point resolved
+    to a live URL must be supplied by the caller (destructive sink
+    types are refused inside dataflow_validator.py itself regardless of
+    what the caller supplies).
+    """
+    sink_type = str(item.metadata.get("sink_type", ""))
+    evidence = await validate_dataflow_correlation(target_url, sink_type, injection, item.location, policy, transport=transport)
+
+    task = ValidationTask(candidate_id=item.id, validator_type="dataflow", status=ValidationStatus.RUNNING)
+    result = ValidationResult(
+        task_id=task.id, status=evidence.status, confidence=item.confidence, observations=[evidence.to_dict()]
+    )
+
+    evidence_bundle = write_evidence_bundle(
+        Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{task.id}_dataflow.json", evidence.to_dict()
+    )
+    stored_evidence = store.record_evidence(
+        run_id, "dataflow_validation", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
+    )
+
+    plan = ValidationPlan(
+        candidate_id=item.id, asset_type=item.asset_type, classification="review_only",
+        reason="dataflow runtime correlation executed with an explicitly supplied injection point",
+    )
+    # No live-endpoint EntityMatch applies here (dataflow candidates are
+    # probed directly against a caller-supplied URL, not resolved via
+    # correlation/resolver.py) -- the candidate is its own provenance.
+    match = EntityMatch(source_item=item, live_item=item, confidence=item.confidence, basis=["dataflow_runtime_correlation"])
+    finding = finding_from_validation_result(run_id, task, result, stored_evidence.id, target_url)
+    if finding is not None:
+        store.insert_finding(finding)
+    correlated = [CorrelatedFinding(finding=finding, static_candidate=item, match=match, plan=plan)] if finding else []
+
+    return DynamicValidationOutcome(item, plan, "ran", f"dataflow correlation -> {result.status.value}", correlated)
