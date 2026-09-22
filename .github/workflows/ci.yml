@@ -46,6 +46,15 @@ jobs:
       - name: SOURCE mode smoke (static source audit)
         run: python main.py audit tests/fixtures/source/sample_app
 
+      - name: LIVE + HYBRID mode smoke (local static server, no external network)
+        run: |
+          python -m http.server 8123 --directory tests/fixtures/source/sample_app &
+          SERVER_PID=$!
+          sleep 1
+          python main.py scan http://127.0.0.1:8123/ --scope config/scope.ci.yaml
+          python main.py scan http://127.0.0.1:8123/ --source tests/fixtures/source/sample_app --scope config/scope.ci.yaml
+          kill "$SERVER_PID" || true
+
       - name: Confirm no secrets or raw evidence are staged
         run: |
           git status --short

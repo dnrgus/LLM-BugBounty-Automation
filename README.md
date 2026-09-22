@@ -98,21 +98,31 @@ pytest
 ## 저장소 구조
 
 ```text
-config/        파이프라인, 모델, 도구, 로깅, Scope 예시
-core/          orchestrator, Full Orchestrator, pipeline profile, 데이터 모델, fingerprint
+config/        파이프라인, 모델, 도구, 로깅, Scope 예시 (config/scope.ci.yaml은 CI LIVE/HYBRID smoke 전용)
+core/          orchestrator(scan/live/hybrid pipeline), checkpoint/resume, cancel, 데이터 모델, fingerprint
 scope/         Scope와 Program Policy 검사
-targets/       Target Adapter 계약과 Fake Target
-adapters/      LLM/Recon/Discovery 외부 도구 어댑터
+targets/       Target Adapter 계약과 Fake Target (+ universal/websocket/browser plugin)
+adapters/      LLM/Recon/Discovery 외부 도구 결과 정규화 어댑터
 attacks/       Mutation Engine과 PyRIT Adaptive Planner
+tools/         외부 바이너리(nuclei/dalfox) 실제 실행 계층 (Policy/Scope 게이트, shell=False)
 recon/         Subfinder/httpx/Katana/ffuf 기반 Asset/Endpoint 파이프라인, AI Endpoint Classifier
+live/          LIVE MODE discovery, 분류, auto-profile
+source/        SOURCE MODE static analysis -- parsers/(Python AST, JS/TS tree-sitter), frameworks/
+               (Express, Next.js), sources/·sinks/·dataflow/(taint tracing), auth/, ai/
+correlation/   Static/Live entity resolver (경로 canonicalization, confidence, review_required)
+validation/    static candidate -> executable/review_only/unsupported 분류, 실제 동적 검증 실행기
+attack_surface/ AttackSurfaceItem 공통 모델과 merge 규칙
+hybrid/        SOURCE + LIVE correlate (exact-match, U8)
+scenario/      multi-turn/cross-session 시나리오 실행기, finding 승격, 재현
 rag_harness/   Controlled RAG corpus, chunking, retrieval harness
-findings/      Finding dedup, root-cause clustering, cluster report
+findings/      Finding dedup, root-cause clustering, external-tool/scenario finding 승격
+packs/         Attack Pack 정의, 선택, 실행
 testcase/      YAML 테스트케이스 스키마, 로더, 기본 suite
-executor/      세션 실행기와 Approval Gate
+executor/      세션 실행기, Approval Gate, cancellation/backpressure
 traces/        Trace export helper
 judges/        rule, canary, regex, ensemble judge
-storage/       SQLite 저장소와 artifact helper
-reporting/     Evidence redaction과 report 생성
+storage/       SQLite 저장소, run_state(resume), artifact helper
+reporting/     Evidence redaction, integrity manifest, report 생성
 tests/         단위 및 통합 테스트
 ```
 
@@ -126,6 +136,12 @@ tests/         단위 및 통합 테스트
 Scope 정책은 deny 규칙을 allow 규칙보다 먼저 적용합니다. Subdomain은 `allow_subdomains: true`가 명시된 경우에만 허용됩니다. Redirect target은 다시 Scope 검사를 거치며, 범위 밖이면 실행하지 않고 record-only decision으로 남깁니다.
 
 고위험 action은 기본적으로 block 또는 simulate 처리합니다. Raw evidence, 로컬 실행 산출물, private report, credential, `.env` 파일은 커밋되지 않도록 `.gitignore`에 포함되어 있습니다.
+
+v3.4.0부터 추가된 안전 장치:
+
+- destructive 가능성이 있는 dataflow sink(RCE/파일 접근/역직렬화/템플릿 인젝션)는 `validation/planner.py`가 항상 `requires_approval: true`로 표시하고 절대 자동으로 `executable` 분류하지 않습니다.
+- Ctrl-C/명시적 cancel은 진행 중인 요청을 강제로 끊지 않고, 다음 안전한 지점(다음 testcase 시작 전, subprocess spawn 직전)에서만 협조적으로 중단합니다 — 진행 중인 evidence/checkpoint 기록은 항상 끝까지 완료됩니다.
+- 모든 run의 Evidence 파일은 report 시점에 다시 SHA-256으로 재검증되어, 기록 이후 변경되거나 삭제된 파일은 `tamper_detected: true`로 표시됩니다(조용히 신뢰하지 않음).
 
 ## 현재 명령
 
@@ -306,6 +322,50 @@ git status --short
 - Judge는 rule/regex/canary만 구현되어 있고, `llm`/`full` 프로필 설정에 남아있는 `semantic` judge 항목은 아직 미구현 (해당 이름을 사용하는 judge 요청은 조용히 no-op 처리됨)
 - Attack Budget의 cost_usd는 provider별 가격표가 없어 실제 비용 데이터가 주어질 때만 집계되고, 기본적으로는 항상 0으로 유지되어 `estimated_cost_usd` 상한이 사실상 강제되지 않음
 
+## v4.0.0 Release Gate
+
+로드맵 문서(`개발로드맵 v3.1 -> v5.0`) 기준 "실전 완성판" 게이트입니다. v3.0.0 이후 URL-only(LIVE)/Source-only(SOURCE)/Both(HYBRID) 세 입력 모두 discovery/audit부터 report까지 끊기지 않고, 재현 가능하며, 안전하게 실패하는 것이 v4.0.0의 완성 기준입니다.
+
+```bash
+# clean install (별도 venv 권장)
+python -m venv .venv && . .venv/bin/activate
+python -m pip install -e ".[dev]"      # JS/TS AST까지 검증하려면 -e ".[dev,jsts]"
+
+pytest
+python main.py doctor
+python main.py judge-benchmark
+python main.py sample-run
+python main.py scan --profile full            # SOURCE 없이도 동작하는 fixture 기반 경로
+python main.py audit tests/fixtures/source/sample_app   # SOURCE MODE
+# LIVE/HYBRID는 실제 도달 가능한 URL이 필요 -- CI는 로컬 http.server로 검증 (.github/workflows/ci.yml)
+git status --short
+```
+
+### v4.0.0 완료 범위
+
+- **LIVE**: URL 입력 → discovery → auto-profile → pack 선택/실행 → judge → reproduce → evidence → report가 `scan <url>` 한 명령으로 완주 (P3.1-1~P3.1-4)
+- **SOURCE**: Python(AST)/JS·TS(tree-sitter, optional) route/dataflow/auth/AI 후보 + evidence가 `audit <path>`로 생성 (P3.2-1~P3.2-4)
+- **HYBRID**: SOURCE/LIVE entity 매칭(confidence + review_required) → validation planning(executable/review_only/unsupported) → 실제 동적 검증 → correlated finding이 `scan <url> --source <path>` 한 명령으로 완주 (P3.3-1~P3.3-4)
+- **Scenario**: multi-turn/cross-session finding이 `reproduce <finding-id>`로 재현 가능 (P3.1-2)
+- **External Tools**: nuclei/dalfox는 Policy/Scope 게이트를 통과한 뒤 실제 실행 + 버전 기록, 미설치 시 graceful skip (P3.1-3)
+- **Operations**: resume(`--resume-run-id`)/cancel(SIGINT)/timeout/checkpoint (P3.4-1, P3.4-2)
+- **Evidence**: raw/sanitized 분리 + run별 SHA-256 integrity manifest + tamper detection (P3.4-3)
+- **Regression**: 기존 175개 baseline을 포함한 전체 테스트 스위트가 100% pass (v3.0.0의 296 → 현재 438)
+- **CI**: lint + unit + regression + integration + LIVE/SOURCE/HYBRID smoke가 모두 `.github/workflows/ci.yml`에서 실행됨
+- **Documentation**: README quickstart, 안전 모델(threat/safety model), 알려진 제한사항 — 모두 이 문서에 포함
+
+### v4.0.0 알려진 제한사항 (Known Limitations)
+
+v1.0.0 이후 새로 생긴/여전히 남은 제한사항입니다 (v1.0.0 절의 기존 목록도 대부분 계속 유효).
+
+- **동적 검증 실행기는 llm/rag/agent만 존재**: `validation/executor.py`는 capability hint(llm/rag/agent)가 같은 파일의 live-매칭된 endpoint와 연결될 때만 기존 testcase_suite pack으로 실제 검증. endpoint 자체(generic)·dataflow·auth 후보는 실제로 검증할 executor가 아직 없어 항상 `review_only`/`unsupported`로만 분류됨 — 가짜 executor를 만들지 않기로 한 의도적 결정
+- **Dataflow/Auth/AI source intelligence는 Python 전용**: JS/TS는 route/call 추출(P3.2-2)까지는 있지만 taint tracing(P3.2-3)과 auth guard 탐지(P3.2-4)는 아직 Python만 지원
+- **TruffleHog는 URL fetch 모드 없음**: 파일시스템 스캔 전용이라 live pack 실행에는 연결되지 않고 결과 파일 방식만 지원 (`tools/trufflehog.py`)
+- **Auth guard 탐지는 candidate일 뿐 확정이 아님**: 알려진 decorator/FastAPI Depends 패턴을 못 찾았다고 "인증 없음"으로 단정하지 않음 (미들웨어/프레임워크 기본값일 수 있음) — 항상 사람 검토 필요
+- Bounded queue(`discover`의 `max_queue_size`)는 메모리 상한만 보장하며, 대형 target에서 SQLite 쓰기 자체를 배치/스트리밍하는 것은 아직 안 함 (각 insert가 독립 connection)
+- **Concurrency limit은 아직 실질적 효과 없음**: `Executor`가 scope.yaml의 `limits.concurrency`를 실제로 세마포어로 적용하지만, 현재 파이프라인 자체가 순차 실행이라 동시 실행 경로가 생기기 전까지는 no-op
+- v1.0.0 절에 있던 항목 중 계속 유효: 실제 Target Adapter 범위(OpenAI 호환/CustomHTTP/Universal/WebSocket/Browser는 있지만 MCP Agent adapter는 없음), 스트리밍 응답(SSE/chunked) 미지원, RAG retrieval이 실제 임베딩이 아닌 Jaccard 근사, semantic judge 미구현, `cost_usd` 예산이 실제 가격표 없이는 항상 0
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -314,6 +374,12 @@ git status --short
 - `v0.2.0-llm-redteam`: Promptfoo/Garak/Mutation/PyRIT 통합
 - `v0.3.0-discovery`: recon, web security tools, AI discovery, RAG harness 통합
 - `v1.0.0`: 안정화된 첫 릴리스 (full orchestrator, dedup/root cause, hardening)
+- `v3.0.0`: Universal Architecture (URL-only/Source-only/Hybrid 대상 공통 Core, U0~U12)
+- `v3.1.0`: Operational Pipeline (`scan <url>` 단일 진입점, scenario finding, external tool runner)
+- `v3.2.0`: Source Intelligence (Python/JS·TS AST, dataflow, auth/AI source intelligence)
+- `v3.3.0`: Static -> Dynamic Validation (entity resolver, validation planner, dynamic validator, `scan <url> --source <path>`)
+- `v3.4.0`: Production Hardening (checkpoint/resume, cancellation, evidence integrity, large-target 성능)
+- `v4.0.0`: 실전 완성판 — 로드맵이 권장하는 최종 목표 (URL/Source/Both 세 입력 모두 end-to-end)
 
 ## 개발 흐름
 
