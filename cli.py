@@ -19,6 +19,7 @@ from core.models import Run
 from core.orchestrator import (
     run_adaptive_pipeline,
     run_full_pipeline,
+    run_hybrid_scan_pipeline,
     run_live_scan_pipeline,
     run_profile_target,
     run_reproduce_finding,
@@ -363,6 +364,27 @@ def cmd_scan(args: argparse.Namespace) -> int:
     testcases = load_testcases(args.testcases)
     store = SQLiteStore(args.db)
 
+    if args.url and args.source:
+        # P3.3-4: HYBRID MODE entry point -- SOURCE audit + LIVE discovery +
+        # entity resolution + validation planning + dynamic validation, in
+        # one call.
+        result = asyncio.run(
+            run_hybrid_scan_pipeline(
+                policy,
+                testcases,
+                store,
+                profile,
+                args.url,
+                args.source,
+                max_pages=args.max_pages,
+                pack_target=args.pack_target,
+                pack_target_config=args.pack_target_config,
+                auth_context_available=args.auth_context,
+            )
+        )
+        print(_json(result))
+        return 0
+
     if args.url:
         # P3.1-1: LIVE MODE entry point -- discover/classify/select-packs/run-packs
         # against a real URL, instead of the fixture-driven --profile path below.
@@ -641,20 +663,31 @@ def build_parser() -> argparse.ArgumentParser:
     scan = sub.add_parser(
         "scan",
         help="LIVE MODE: `scan <url>` discovers/classifies/selects/runs packs end-to-end (P3.1-1). "
-        "Without a url, runs the fixture-driven full orchestrator (scope -> recon -> classify -> "
-        "scan -> judge -> reproduce -> dedup -> report) for a profile.",
+        "HYBRID MODE: `scan <url> --source <path>` adds SOURCE audit + entity resolution + dynamic "
+        "validation (P3.3-4). Without a url, runs the fixture-driven full orchestrator (scope -> "
+        "recon -> classify -> scan -> judge -> reproduce -> dedup -> report) for a profile.",
     )
     scan.add_argument(
         "url", nargs="?", default=None,
-        help="LIVE MODE: target URL to discover/classify/pack-select/pack-run. Omit to use the "
-        "fixture-based --profile pipeline below.",
+        help="LIVE/HYBRID MODE: target URL to discover/classify/pack-select/pack-run. Omit to use "
+        "the fixture-based --profile pipeline below.",
+    )
+    scan.add_argument(
+        "--source", type=Path, default=None,
+        help="HYBRID MODE: source tree to audit alongside the url (SOURCE + LIVE correlation and "
+        "dynamic validation, P3.3-4). Requires url; ignored if url is omitted.",
+    )
+    scan.add_argument(
+        "--auth-context", action="store_true",
+        help="HYBRID MODE only: an authenticated session/account is available for testing, so "
+        "endpoints with a detected auth guard aren't automatically downgraded to review_only",
     )
     scan.add_argument("--profile", choices=["quick", "llm", "agent", "rag", "web", "full"], default="quick")
     scan.add_argument("--pipeline-config", type=Path, default=DEFAULT_PIPELINE_CONFIG)
     scan.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))
-    scan.add_argument("--max-pages", type=int, default=5, help="LIVE MODE only: max pages for the discovery crawl")
+    scan.add_argument("--max-pages", type=int, default=5, help="LIVE/HYBRID MODE only: max pages for the discovery crawl")
     scan.add_argument(
         "--auto-profile", action="store_true",
         help="LIVE MODE only: verify classified llm/api candidates via the Capability Probe",

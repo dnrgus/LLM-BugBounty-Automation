@@ -9,6 +9,7 @@ from adapters.llm.pyrit import PyRITAdapter
 from adapters.scanner.dalfox import DalfoxAdapter
 from adapters.scanner.nuclei import NucleiAdapter
 from adapters.secrets.trufflehog import TruffleHogAdapter
+from attack_surface.models import AttackSurfaceItem
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
 from core.budget import AttackBudget
@@ -27,6 +28,7 @@ from core.models import (
 )
 from core.profile import PipelineProfile
 from core.profiler import profile_target
+from correlation.resolver import EntityMatch, resolve_entities
 from executor.runner import Executor
 from findings.dedup import base_testcase_id, cluster_findings
 from findings.report import write_cluster_report
@@ -43,6 +45,7 @@ from reproduction.reproducer import Reproducer
 from scenario.models import Scenario, ScenarioStep
 from scenario.reproducer import reproduce_scenario_finding
 from scope.policy import PolicyEngine
+from source.audit import collect_source_items
 from storage.sqlite import SQLiteStore
 from targets.base import TargetMetadata
 from targets.errors import TargetError
@@ -50,6 +53,7 @@ from targets.factory import create_target
 from testcase.coverage import build_coverage_matrix, coverage_summary
 from testcase.selector import select_executable_testcases
 from testcase.schema import Testcase
+from validation.planner import generate_validation_plans
 
 _MAX_CONSECUTIVE_TARGET_ERRORS = 3
 
@@ -614,6 +618,120 @@ async def run_live_scan_pipeline(
         "finding_status_summary": finding_status_summary,
         "clusters": clusters,
         "reports": reports,
+    }
+
+
+async def run_hybrid_scan_pipeline(
+    policy: PolicyEngine,
+    testcases: list[Testcase],
+    store: SQLiteStore,
+    profile: PipelineProfile,
+    url: str,
+    source_path: Path | str,
+    max_pages: int = 5,
+    max_files: int = 2000,
+    pack_target: str | None = None,
+    pack_target_config: Path | str | None = None,
+    auth_context_available: bool = False,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, object]:
+    """P3.3-4 (roadmap v3.3.0 Static -> Dynamic Validation): `scan <url>
+    --source <path>`'s HYBRID MODE entry point -- makes SOURCE audit +
+    LIVE discovery + entity resolution (P3.3-1) + validation planning
+    (P3.3-2) + dynamic validation (P3.3-3) one call, the way
+    run_live_scan_pipeline made URL-only LIVE MODE one call in P3.1-1.
+
+    Reuses each stage's existing building blocks rather than
+    reimplementing them: source.audit.collect_source_items (not
+    hybrid.correlate.correlate_source_and_live's already-merged result,
+    since P3.3-1's resolve_entities needs the raw, pre-merge source and
+    live item lists), live.discovery.discover_target,
+    correlation.resolver.resolve_entities, validation.planner.
+    generate_validation_plans, and validation.executor.
+    run_dynamic_validation for each plan actually classified
+    "executable". Distinguishes three result sections per the roadmap's
+    own DoD: static_findings (source-only), live_findings (discovery),
+    and correlated_findings (Findings with real dynamic evidence).
+    """
+    # Local import: validation.executor imports run_sample_pipeline from
+    # this module, so importing it at module scope here would be circular.
+    from validation.executor import run_dynamic_validation
+
+    store.initialize()
+    _ingestion, source_items = collect_source_items(source_path, max_files=max_files)
+    discovery = await discover_target(url, policy, max_pages=max_pages, transport=transport)
+
+    matches = resolve_entities(source_items, discovery.items)
+    all_items = source_items + discovery.items
+    plans = generate_validation_plans(all_items, matches=matches, auth_context_available=auth_context_available)
+    plans_by_candidate_id = {plan.candidate_id: plan for plan in plans}
+
+    combined_run = Run(target_id="hybrid_scan", policy_hash=policy.policy_hash, fingerprint=f"hybrid_scan:{url}")
+    store.insert_run(combined_run)
+
+    correlated_findings = []
+    dynamic_validation_runs = []
+    if pack_target is not None:
+        matches_by_source_id: dict[str, EntityMatch] = {match.source_item.id: match for match in matches}
+        endpoint_items_by_file: dict[str, list[AttackSurfaceItem]] = {}
+        for endpoint_item in source_items:
+            if endpoint_item.asset_type == "endpoint" and endpoint_item.metadata.get("file"):
+                endpoint_items_by_file.setdefault(str(endpoint_item.metadata["file"]), []).append(endpoint_item)
+
+        for item in source_items:
+            if item.asset_type not in {"llm", "rag", "agent"}:
+                continue
+            plan = plans_by_candidate_id.get(item.id)
+            if plan is None or plan.classification != "executable":
+                continue
+            # Mirrors validation/planner.py's _plan_ai_capability: the
+            # same-file live-matched endpoint that justified "executable"
+            # is also the match this candidate's dynamic run is anchored to.
+            same_file_endpoints = endpoint_items_by_file.get(str(item.metadata.get("file", "")), [])
+            supporting_match = next(
+                (
+                    matches_by_source_id[endpoint.id]
+                    for endpoint in same_file_endpoints
+                    if endpoint.id in matches_by_source_id and not matches_by_source_id[endpoint.id].review_required
+                ),
+                None,
+            )
+            if supporting_match is None:
+                continue
+            outcome = await run_dynamic_validation(
+                item, plan, supporting_match, policy, testcases, store,
+                target_kind=pack_target, target_config=pack_target_config, profile=profile,
+            )
+            dynamic_validation_runs.append(outcome)
+            correlated_findings.extend(outcome.correlated_findings)
+
+    reportable = [
+        correlated.finding
+        for correlated in correlated_findings
+        if correlated.finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}
+    ]
+    clusters = _cluster_and_report(combined_run, reportable, [])
+
+    static_by_asset_type: dict[str, int] = {}
+    for item in source_items:
+        static_by_asset_type[item.asset_type] = static_by_asset_type.get(item.asset_type, 0) + 1
+
+    return {
+        "mode": "hybrid",
+        "url": url,
+        "source_root": str(_ingestion.root),
+        "static_findings": {
+            "total": len(source_items),
+            "by_asset_type": static_by_asset_type,
+            "items": [item.to_dict() for item in source_items],
+        },
+        "live_findings": {"discovery": discovery.to_dict()},
+        "entity_matches": [match.to_dict() for match in matches],
+        "validation_plans": [plan.to_dict() for plan in plans],
+        "dynamic_validation_runs": [run.to_dict() for run in dynamic_validation_runs],
+        "correlated_findings": [correlated.to_dict() for correlated in correlated_findings],
+        "finding_count": len(reportable),
+        "clusters": clusters,
     }
 
 
