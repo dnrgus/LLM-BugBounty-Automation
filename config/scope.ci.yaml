@@ -1,0 +1,23 @@
+# P4.0 Release Hardening: scope used only by CI's LIVE/HYBRID smoke test
+# (.github/workflows/ci.yml), which points `scan`/`discover` at a local
+# `python -m http.server` instance -- never a real external target.
+program: ci-local-smoke
+scope:
+  domains: [127.0.0.1, localhost]
+  allow_subdomains: false
+testing:
+  automated_scanning: true
+  prompt_injection: true
+  system_prompt_leak: true
+  indirect_injection: true
+  rag_security: true
+limits:
+  requests_per_second: 10
+  concurrency: 5
+  max_requests_per_run: 100
+approval_required: []
+blocked_actions:
+  - send_message
+  - account_state_change
+  - payment
+  - delete
