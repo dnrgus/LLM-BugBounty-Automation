@@ -240,6 +240,12 @@ class Evidence:
     path: str
     sha256: str
     sanitized: bool
+    # P3.4-3 (roadmap v3.4.0 Production Hardening): the raw artifact this
+    # sanitized one was derived from, if the caller supplied one --
+    # optional/additive so every existing call site (which only ever
+    # passed the sanitized path) keeps working unchanged.
+    raw_path: str | None = None
+    raw_sha256: str | None = None
     id: str = field(default_factory=lambda: new_id("evidence"))
 
 

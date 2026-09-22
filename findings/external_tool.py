@@ -54,7 +54,9 @@ def _promote_one(tool_id: str, item: dict[str, object], run_id: str, store: SQLi
         f"{run_id}_{tool_id}_{new_id('extfinding')}.json",
         dict(item),
     )
-    evidence = store.record_evidence(run_id, f"{tool_id}_finding", evidence_bundle.sanitized_path)
+    evidence = store.record_evidence(
+        run_id, f"{tool_id}_finding", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
+    )
 
     finding = Finding(
         run_id=run_id,
