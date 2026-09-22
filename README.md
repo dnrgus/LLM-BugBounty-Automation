@@ -80,6 +80,15 @@
 - Artifact Integrity / Redaction (P3.4-3, `reporting/integrity.py`): `sample-run`/`scan` 등 모든 실행이 끝날 때마다 그 run의 모든 Evidence 파일(raw+sanitized)을 다시 SHA-256으로 해싱해서 기록된 값과 비교하는 manifest(`{run_id}_manifest.json`)를 생성 — 기록 이후 파일이 바뀌었거나 삭제됐으면 `tamper_detected: true`로 표시(조용히 신뢰하지 않음). `Evidence`에 `raw_path`/`raw_sha256`를 추가해서 raw→sanitized provenance를 DB에도 남김(기존 호출부는 그대로 동작, 전부 추가된 선택 필드). 기존에 이미 있던 `reporting/evidence.py`(raw/sanitized 분리)·`reporting/sanitizer.py`(secret/cookie/token redaction)는 그대로 재사용 — roadmap이 제안한 `evidence/integrity.py` 경로 대신 `reporting/integrity.py`를 쓴 이유는 `evidence/`가 이미 raw/sanitized 산출물이 쌓이는 런타임 디렉터리라서 Python 패키지명과 충돌하기 때문
 - Large Target / Performance (P3.4-4): `correlation/resolver.py`의 entity resolution을 O(source × live) 전체 스캔에서 canonical path/버전-제거 경로/마지막 path segment로 인덱싱한 O(source + live)로 변경(정확히 동일한 confidence/basis 결과 유지, 기존 테스트 전부 그대로 통과). `findings/dedup.py`의 exact-key 매칭도 매 finding마다 버킷 전체를 스캔하던 것을 dict 조회 O(1)로 변경(가장 흔한 경우인 "같은 seed testcase의 mutation/adaptive 변종"에 적용, title-similarity fallback은 여전히 선형 — v2로 계획된 영역). `live/discovery.py`의 크롤 큐(`to_visit`)에 `max_queue_size`(기본 1000) cap과 중복 큐잉 방지를 추가 — 링크가 극단적으로 많은 페이지가 있어도 메모리가 무한정 늘어나지 않고, `list.pop(0)`이 매번 처리하는 리스트 크기도 큐 cap으로 제한됨
 
+**v4.1.0 Dynamic Validation Expansion** (완료, `v4.1.0` 태그 — v3.3.0이 llm/rag/agent에만 만들었던 실제 동적 검증기를 endpoint/auth/dataflow까지 확장):
+
+- Validation Contract (4.1-A, `validation/contract.py`): 검증 생명주기를 8단계 상태 머신(`ValidationStatus`: PLANNED/EXECUTABLE/RUNNING/BLOCKED/CONFIRMED/REJECTED/UNSTABLE/REVIEW_ONLY)과 명시적 transition table로 통일. `CONFIRMED`/`REJECTED`/`UNSTABLE`는 의도적으로 기존 `core.models.FindingStatus`와 문자열 값이 동일 — 이름만 비슷한 게 아니라 실제로 호환됨을 테스트로 증명. `validation/legacy_adapter.py`가 v3.3.0의 `ValidationPlan`/`DynamicValidationOutcome`을 그대로 감싸서(수정 없이) 이 새 contract로 노출
+- Endpoint Validator (4.1-B, `validation/endpoint_validator.py`): 후보 endpoint에 안전한 메소드(GET/HEAD/OPTIONS, 선언된 메소드 중 안전한 것만 추가)로만 probe. 매 redirect hop마다 Policy로 다시 검증하고 out-of-scope 대상은 절대 따라가지 않음
+- Auth Validator (4.1-C, `validation/auth_validator.py`): 명시적으로 제공된 fixture/env/browser-session 인증 컨텍스트 두 개(control/probe)로 같은 요청을 보내 응답 구조(정렬된 JSON key 집합, 원본 body는 절대 저장 안 함)를 비교. 자격증명 추측/탈취는 절대 하지 않으며, 응답이 모호하면 항상 `review_only`/`unstable` — 절대 자동으로 `confirmed` 처리하지 않음
+- Dataflow Validator (4.1-D, `validation/dataflow_validator.py`): 정적으로 추적된 source→sink 후보에 무해한 correlation token을 주입해 응답에 반사(reflect)되는지만 확인 — sink의 실제 payload/동작은 절대 실행하지 않음. `os_command`/`sql_injection`/`deserialization` 등 destructive sink 유형이나 request body가 필요한 주입 위치는 아예 요청을 보내지 않고 `review_only`
+- Finding/Reproducer/Report 연결 (4.1-E, `validation/finding_adapter.py`): `Finding`에 `origin`/`static_candidate_id`/`validation_task_ids`/`validation_status` 4개 필드 추가(전부 optional, 기존 호출부 영향 없음). Endpoint Validator는 "executable" 분류에서 자동 실행되고(CONFIRMED = 도달 가능 확인, 취약점 단정 아님), Auth/Dataflow Validator는 호출자가 실제 컨텍스트(인증 컨텍스트 쌍/주입 위치)를 명시적으로 제공할 때만 실행(planner가 이 둘을 항상 `review_only`로 유지하는 설계와 일치). `findings/dedup.py`는 이런 validation-origin finding을 `validator_type + candidate + target entity`로 dedup(재검증마다 바뀌는 랜덤 task id 대신 결정론적 키). Report는 static_candidate가 있는 finding에만 정적 근거/동적 검증/제한사항 섹션을 추가
+- Release Hardening (4.1-F): 기존 438개 회귀 스위트 + 새 74개 테스트 전부 pass(총 512), llm/rag/agent 동작은 전혀 변경 없이 그대로, 모든 신규 validator가 Policy 게이트를 먼저 통과. **알려진 범위**: endpoint validator는 `scan <url> --source <path>` HYBRID CLI에 아직 자동 연결되지 않음(라이브러리 레벨 dispatch는 완성/테스트됨) — CLI 자동 실행 확장은 회귀 위험을 이 하드닝 단계에서 새로 만들지 않기 위해 의도적으로 다음 단계로 미룸
+
 ## 빠른 시작
 
 ```bash
@@ -366,6 +375,35 @@ v1.0.0 이후 새로 생긴/여전히 남은 제한사항입니다 (v1.0.0 절�
 - **Concurrency limit은 아직 실질적 효과 없음**: `Executor`가 scope.yaml의 `limits.concurrency`를 실제로 세마포어로 적용하지만, 현재 파이프라인 자체가 순차 실행이라 동시 실행 경로가 생기기 전까지는 no-op
 - v1.0.0 절에 있던 항목 중 계속 유효: 실제 Target Adapter 범위(OpenAI 호환/CustomHTTP/Universal/WebSocket/Browser는 있지만 MCP Agent adapter는 없음), 스트리밍 응답(SSE/chunked) 미지원, RAG retrieval이 실제 임베딩이 아닌 Jaccard 근사, semantic judge 미구현, `cost_usd` 예산이 실제 가격표 없이는 항상 0
 
+## v4.1.0 Release Gate
+
+구현계획서(`v4.1-v4.4 구체적 구현계획서`) 기준 "Dynamic Validation Expansion" 게이트입니다. v4.0.0까지 llm/rag/agent에만 있던 실제 동적 검증기(가짜 executor 없이 실제로 무언가를 실행해보는 것)를 endpoint/auth/dataflow로 확장하고, 그 결과가 Finding/Reproducer/Report까지 실제로 도달하는 것이 v4.1.0의 완성 기준입니다.
+
+```bash
+pytest   # 512 passed
+ruff check .
+python main.py doctor
+python main.py judge-benchmark
+```
+
+### v4.1.0 완료 범위
+
+- **Validation Contract**: `ValidationTask`/`ValidationResult`/`ValidationStatus`(8-state) + 기존 v3.3.0 `ValidationPlan`/`DynamicValidationOutcome`을 감싸는 legacy adapter (4.1-A)
+- **Endpoint Validator**: 안전한 메소드만 probe, redirect hop마다 재검증 (4.1-B)
+- **Auth Validator**: 명시적으로 제공된 컨텍스트 쌍의 응답 구조 비교, 절대 자격증명 추측/탈취 없음 (4.1-C)
+- **Dataflow Validator**: correlation token 반사 여부만 확인, destructive sink는 요청 자체를 보내지 않음 (4.1-D)
+- **Finding/Report 통합**: Finding의 새 provenance 필드(전부 optional), validator-origin finding의 결정론적 dedup key, Report의 정적 근거/동적 검증/제한사항 섹션 (4.1-E)
+- **Regression**: 기존 438개 baseline을 포함한 전체 테스트 스위트가 100% pass (v4.0.0의 438 → 현재 512, 신규 74개)
+- **CI**: 기존 `.github/workflows/ci.yml`(lint + unit + regression + integration + LIVE/SOURCE/HYBRID smoke)이 변경 없이 그대로 통과
+
+### v4.1.0 알려진 제한사항 (Known Limitations)
+
+v4.0.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 생긴/여전히 남은 항목만 추가합니다.
+
+- **Endpoint/Auth/Dataflow validator는 아직 `scan <url> --source <path>` CLI에 자동 연결되지 않음**: `validation/executor.py`의 `run_endpoint_validation`/`run_auth_validation`/`run_dataflow_validation`은 라이브러리 레벨에서 완성/테스트됐지만(`tests/test_validation_dispatch.py`), `core/orchestrator.py`의 `run_hybrid_scan_pipeline`은 여전히 llm/rag/agent capability hint만 자동 실행함 — endpoint를 CLI에 자동 연결하면 기존 `test_hybrid_scan_dynamically_validates_...`류 테스트의 `dynamic_validation_runs` 개수 단정이 깨지므로, 이번 하드닝 단계에서 회귀 위험을 새로 만들지 않기 위해 의도적으로 다음 단계로 미룸
+- **Auth/Dataflow validator는 호출자가 컨텍스트를 직접 준비해야 함**: `AuthContext` 쌍(실제 fixture/env/browser-session 자격증명)이나 `DataflowInjectionPoint`(주입 위치)를 자동으로 추론/생성하지 않음 — 이 프로젝트가 자격증명을 추측하거나 탈취하지 않는다는 안전 원칙에 따른 의도적 설계
+- v4.0.0 절에 있던 "동적 검증 실행기는 llm/rag/agent만 존재" 항목은 이번 버전으로 endpoint까지는 실행기가 생겼지만, auth/dataflow는 여전히 컨텍스트 없이는 자동 실행되지 않으므로 완전히 해소된 것은 아님(위 두 항목 참고)
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -380,6 +418,7 @@ v1.0.0 이후 새로 생긴/여전히 남은 제한사항입니다 (v1.0.0 절�
 - `v3.3.0`: Static -> Dynamic Validation (entity resolver, validation planner, dynamic validator, `scan <url> --source <path>`)
 - `v3.4.0`: Production Hardening (checkpoint/resume, cancellation, evidence integrity, large-target 성능)
 - `v4.0.0`: 실전 완성판 — 로드맵이 권장하는 최종 목표 (URL/Source/Both 세 입력 모두 end-to-end)
+- `v4.1.0`: Dynamic Validation Expansion (validation contract, endpoint/auth/dataflow validator, Finding/Reproducer/Report 통합)
 
 ## 개발 흐름
 
