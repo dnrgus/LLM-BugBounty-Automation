@@ -414,6 +414,23 @@ class SQLiteStore:
             rows = conn.execute(f"select * from findings where run_id in ({placeholders})", run_ids).fetchall()
         return [self._row_to_finding(row, columns) for row in rows]
 
+    def update_finding_reproduction_spec(self, finding_id: str, reproduction_spec: dict[str, object]) -> None:
+        """P3.3-3 (roadmap v3.3.0): lets validation/executor.py tag an
+        already-inserted Finding's reproduction_spec with dynamic-
+        validation provenance (origin=[static,dynamic], the static
+        candidate it came from) after the fact, without needing a
+        second insert path. No-op on an older schema missing the
+        column, same fallback convention as insert_finding.
+        """
+        with self.connect() as conn:
+            columns = {row["name"] for row in conn.execute("pragma table_info(findings)").fetchall()}
+            if "reproduction_spec" not in columns:
+                return
+            conn.execute(
+                "update findings set reproduction_spec = ? where id = ?",
+                (_json(reproduction_spec), finding_id),
+            )
+
     def get_finding(self, finding_id: str) -> Finding | None:
         with self.connect() as conn:
             columns = {row["name"] for row in conn.execute("pragma table_info(findings)").fetchall()}
