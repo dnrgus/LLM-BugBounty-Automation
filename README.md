@@ -71,6 +71,7 @@
 - Static/Live Entity Resolver (P3.3-1, `correlation/resolver.py`): SOURCE의 route와 LIVE에서 관측된 endpoint를 `attack_surface/merge.py`의 정확 일치(exact method+path)보다 안정적으로 매칭 — path parameter를 표기법(Flask `<int:id>`, FastAPI `{id}`, `:id`/`*slug`) 관계없이 하나의 canonical `{param}` 토큰으로 정규화하고, 라이브 쪽의 숫자/UUID 같은 concrete 세그먼트도 같은 토큰으로 정규화해서 매칭. `/v1` 같은 version prefix와 리버스 프록시 prefix(suffix match)도 더 낮은 confidence로 허용. LIVE MODE는 안전을 위해 항상 GET으로만 probe하므로 discovery가 관측한 method는 "실제 허용 메소드"가 아니라 "probe에 쓴 메소드"로 취급 — source가 non-GET을 선언해도 매칭은 되지만 confidence가 낮아지고 근거(`basis`)에 명시됨. 모든 매칭 결과는 confidence 0.6 미만이면 `review_required: true`로 표시되어 자동 공격 대상에서 제외됨 (기존 `correlate` 명령/`merge_items()`의 exact-match 동작은 그대로 유지, 이 resolver는 추가된 상위 레이어)
 - Validation Plan Generator (P3.3-2, `validation/planner.py`, `validation/templates/categories.yaml`): SOURCE MODE가 만든 모든 static candidate(endpoint/dataflow/auth/llm·rag·agent/secret/function/parameter)를 `executable`(실행 가능한 기존 파이프라인이 있음)/`review_only`(검증 경로는 있지만 사람 판단·컨텍스트 필요)/`unsupported`(이 finding 유형엔 동적 검증 개념 자체가 적용 안 됨) 중 하나로 분류하고 이유를 남김. RCE/파일접근/역직렬화/템플릿 인젝션 같은 destructive sink는 항상 `requires_approval: true`로 자동 실행 대상에서 제외. auth guard가 감지된 endpoint는 인증 컨텍스트가 주어지지 않으면 `review_only`로 강등. LLM/RAG/Agent capability hint는 같은 파일 안에 live로 확인된 endpoint가 있어야만 (기존 testcase_suite pack으로) `executable`이 됨
 - Dynamic Validator + Correlated Finding (P3.3-3, `validation/executor.py`, `findings/correlation.py`): "executable"로 분류된 llm/rag/agent capability hint를 실제로 해당 testcase_suite pack(Executor→JudgeEnsemble→Reproducer, 기존 control-vs-attack 로직 그대로 재사용)으로 실행하고, 결과 Finding의 `reproduction_spec`에 `origin: [static, dynamic]`과 원본 static candidate id/entity match 근거를 덧붙여 저장 — static-only 후보와 동적으로 검증된 후보가 구분됨. endpoint/dataflow/auth 등 아직 실행기가 없는 유형은 "not_run"으로 명확히 표시(가짜 executor를 만들지 않음)
+- Hybrid CLI 완성 (P3.3-4, `scan <url> --source <path>`): SOURCE audit + LIVE discovery + entity resolution(P3.3-1) + validation planning(P3.3-2) + dynamic validation(P3.3-3)을 한 명령으로 연결. 결과를 `static_findings`(source-only)/`live_findings`(discovery)/`entity_matches`/`validation_plans`/`correlated_findings`(실제 동적 근거가 있는 Finding)로 명확히 구분해서 보고. 같은 static candidate에 매칭되는 live endpoint가 여러 개(예: 페이지 fingerprint + form action)라도 동적 검증은 후보당 한 번만 실행 (duplicate suppression). 기존 `scan <url>`(source 없이)과 `scan --profile`(url 없이) 동작은 완전히 그대로 유지
 
 ## 빠른 시작
 
@@ -233,6 +234,12 @@ python main.py scan --profile agent
 # (기존 discover --classify --auto-profile --select-packs --run-packs 조합과 동일한 결과)
 python main.py scan https://target.example.com --scope config/my-scope.yaml \
   --pack-target openai --pack-target-config config/targets/my-target.yaml
+
+# HYBRID MODE scan (v3.3.0 P3.3-4 Hybrid CLI 완성): URL과 소스 경로를 함께 주면
+# SOURCE audit + LIVE discovery + entity resolution + validation planning + dynamic
+# validation을 한 명령으로 연결 (static_findings/live_findings/correlated_findings로 구분해 보고)
+python main.py scan https://target.example.com --source ./target-source \
+  --scope config/my-scope.yaml --pack-target openai --pack-target-config config/targets/my-target.yaml
 ```
 
 ## 산출물
