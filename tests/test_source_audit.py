@@ -24,11 +24,36 @@ def test_ingest_source_respects_max_files_budget(tmp_path: Path) -> None:
 
 
 def test_extract_routes_finds_flask_endpoints() -> None:
+    # P3.2-1: the AST parser resolves @app.route(..., methods=[...])'s
+    # kwarg correctly ("POST"), unlike the old regex extractor (which
+    # always reported the generic "ROUTE" for any @app.route(...) call,
+    # never inspecting methods=[...]) -- a deliberate accuracy
+    # improvement, not a regression.
     result = ingest_source(FIXTURE)
     routes = extract_routes(result.files)
     locations = {(item.metadata["method"], item.location) for item in routes}
-    assert ("ROUTE", "/api/chat") in locations
-    assert ("ROUTE", "/api/admin/run") in locations
+    assert ("POST", "/api/chat") in locations
+    assert ("POST", "/api/admin/run") in locations
+    ast_routes = {item.location: item for item in routes if item.metadata["extraction"] == "ast"}
+    assert ast_routes["/api/chat"].metadata["handler"] == "chat"
+    assert ast_routes["/api/admin/run"].metadata["handler"] == "run_command"
+
+
+def test_extract_routes_falls_back_to_regex_for_a_python_file_ast_cannot_parse(tmp_path: Path) -> None:
+    from source.ingestion import SourceFile
+
+    broken = tmp_path / "broken.py"
+    broken.write_text(
+        "def app.route('/x'\n"  # deliberately invalid syntax
+        "    this is not valid python at all\n"
+        '@app.route("/fallback-route")\n'
+        "def handler():\n"
+        "    return 'ok'\n",
+        encoding="utf-8",
+    )
+    routes = extract_routes([SourceFile(path=broken, language="python")])
+    assert any(item.location == "/fallback-route" for item in routes)
+    assert all(item.metadata["extraction"] == "pattern" for item in routes)
 
 
 def test_extract_routes_does_not_double_count_an_explicit_method_decorator() -> None:

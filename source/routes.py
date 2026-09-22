@@ -4,6 +4,8 @@ import re
 
 from attack_surface.models import AttackSurfaceItem
 from source.ingestion import SourceFile
+from source.models import RouteNode
+from source.parsers.python import PythonASTParser
 
 # Pattern-based, not AST-based (design doc section 8's "초기 범위"): high
 # precision on the common decorator/call shapes, not a full parser. Flask's
@@ -20,9 +22,23 @@ _DJANGO_PATH = re.compile(r'\bpath\(\s*r?["\']([^"\']*)["\']')
 
 _ROUTE_LANGUAGES = {"python", "javascript", "typescript"}
 
+_python_ast_parser = PythonASTParser()
+
 
 def extract_routes(files: list[SourceFile]) -> list[AttackSurfaceItem]:
+    """P3.2-1 (roadmap v3.2.0 Source Intelligence): Python files are
+    parsed with the AST-based PythonASTParser first (source/parsers/
+    python.py) -- "구조 이해" instead of pattern matching. A Python file
+    the parser can't handle (ParserResult.errors non-empty, e.g. a
+    genuine SyntaxError) falls back to this module's original regex
+    extractor for *that file only*, so one bad file degrades gracefully
+    instead of losing route coverage for the whole tree. Every other
+    language (JS/TS for now) still goes through the regex path only --
+    unchanged from before this phase.
+    """
     items: list[AttackSurfaceItem] = []
+    regex_fallback_files: list[SourceFile] = []
+
     for source_file in files:
         if source_file.language not in _ROUTE_LANGUAGES:
             continue
@@ -30,7 +46,22 @@ def extract_routes(files: list[SourceFile]) -> list[AttackSurfaceItem]:
             text = source_file.path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
+        if source_file.language == "python":
+            result = _python_ast_parser.parse_file(source_file.path, text)
+            if result.errors:
+                regex_fallback_files.append(source_file)
+            else:
+                items.extend(_ast_route_item(source_file, route) for route in result.routes)
+            continue
         items.extend(_extract_from_text(source_file, text))
+
+    for source_file in regex_fallback_files:
+        try:
+            text = source_file.path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        items.extend(_extract_from_text(source_file, text))
+
     return items
 
 
@@ -39,27 +70,56 @@ def _extract_from_text(source_file: SourceFile, text: str) -> list[AttackSurface
     for match in _FASTAPI_FLASK_ROUTE.finditer(text):
         method_token, path = match.groups()
         method = "ROUTE" if method_token == "route" else method_token.upper()
-        items.append(_route_item(source_file, text, match.start(), method, path, "flask_fastapi"))
+        line = text.count("\n", 0, match.start()) + 1
+        items.append(_route_item(source_file, line, method, path, "flask_fastapi", extraction="pattern"))
     for match in _EXPRESS_ROUTE.finditer(text):
         method_token, path = match.groups()
-        items.append(_route_item(source_file, text, match.start(), method_token.upper(), path, "express"))
+        line = text.count("\n", 0, match.start()) + 1
+        items.append(_route_item(source_file, line, method_token.upper(), path, "express", extraction="pattern"))
     for match in _DJANGO_PATH.finditer(text):
         (path,) = match.groups()
         if not path:
             continue
-        items.append(_route_item(source_file, text, match.start(), "ANY", path, "django"))
+        line = text.count("\n", 0, match.start()) + 1
+        items.append(_route_item(source_file, line, "ANY", path, "django", extraction="pattern"))
     return items
 
 
-def _route_item(source_file: SourceFile, text: str, offset: int, method: str, path: str, framework: str) -> AttackSurfaceItem:
-    line = text.count("\n", 0, offset) + 1
+def _ast_route_item(source_file: SourceFile, route: RouteNode) -> AttackSurfaceItem:
+    return _route_item(
+        source_file, route.line, route.method, route.path, route.framework,
+        extraction="ast", handler=route.handler,
+    )
+
+
+def _route_item(
+    source_file: SourceFile,
+    line: int,
+    method: str,
+    path: str,
+    framework: str,
+    extraction: str = "pattern",
+    handler: str | None = None,
+) -> AttackSurfaceItem:
     location = path if path.startswith("/") else f"/{path}"
+    metadata: dict[str, object] = {
+        "method": method,
+        "framework": framework,
+        "file": str(source_file.path),
+        "line": line,
+        "extraction": extraction,
+    }
+    if handler is not None:
+        metadata["handler"] = handler
     return AttackSurfaceItem(
         source_type="source",
         asset_type="endpoint",
         location=location,
-        metadata={"method": method, "framework": framework, "file": str(source_file.path), "line": line},
-        confidence=0.6,
+        # AST-derived routes carry a real parsed method/path/handler
+        # (not a pattern match that could be a false positive in a
+        # comment/string), so they get a higher base confidence.
+        metadata=metadata,
+        confidence=0.75 if extraction == "ast" else 0.6,
         evidence_refs=[f"{source_file.path}:{line}"],
         correlation_keys=[f"{method}:{location}"],
     )
