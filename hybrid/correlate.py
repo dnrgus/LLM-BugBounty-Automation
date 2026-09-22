@@ -52,6 +52,7 @@ def correlate_source_and_live(
     network requests or re-derive a Scope/Policy decision on its own.
     """
     ingestion = ingest_source(source_root, max_files=max_files)
-    source_items = extract_routes(ingestion.files) + analyze_files(ingestion.files)
+    routes = extract_routes(ingestion.files)
+    source_items = routes + analyze_files(ingestion.files, routes)
     merged = merge_items(source_items + live_result.items)
     return CorrelationResult(source_root=str(ingestion.root), live_base_url=live_result.base_url, items=merged)
