@@ -27,6 +27,7 @@ from core.models import (
     TraceEvent,
 )
 from storage.artifacts import sha256_file
+from validation.contract import ValidationResult, ValidationTask
 
 
 def _json(data: object) -> str:
@@ -209,6 +210,27 @@ class SQLiteStore:
                   run_id text not null,
                   path text not null,
                   kind text not null
+                );
+                create table if not exists validation_tasks (
+                  id text primary key,
+                  candidate_id text not null,
+                  validator_type text not null,
+                  prerequisites text not null,
+                  risk_level text not null,
+                  required_sessions integer not null,
+                  budget_hint text not null,
+                  status text not null,
+                  created_at text not null,
+                  updated_at text not null
+                );
+                create table if not exists validation_results (
+                  id text primary key,
+                  task_id text not null,
+                  status text not null,
+                  confidence real not null,
+                  evidence_refs text not null,
+                  observations text not null,
+                  created_at text not null
                 );
                 """
             )
@@ -515,3 +537,55 @@ class SQLiteStore:
         with self.connect() as conn:
             rows = conn.execute("select path from reports where run_id = ?", (run_id,)).fetchall()
         return [row["path"] for row in rows]
+
+    def upsert_validation_task(self, task: ValidationTask) -> None:
+        """P4.1-A (roadmap v4.1.0 Dynamic Validation Expansion): persists
+        a ValidationTask's current state -- "insert or replace" so
+        repeated calls as a task moves through its lifecycle
+        (transition()) just update the same row."""
+        data = task.to_dict()
+        data["prerequisites"] = _json(data["prerequisites"])
+        data["budget_hint"] = _json(data["budget_hint"])
+        with self.connect() as conn:
+            conn.execute(
+                "insert or replace into validation_tasks values "
+                "(:id, :candidate_id, :validator_type, :prerequisites, :risk_level, :required_sessions, "
+                ":budget_hint, :status, :created_at, :updated_at)",
+                data,
+            )
+
+    def get_validation_task(self, task_id: str) -> ValidationTask | None:
+        with self.connect() as conn:
+            row = conn.execute("select * from validation_tasks where id = ?", (task_id,)).fetchone()
+        if row is None:
+            return None
+        return ValidationTask.from_dict(
+            {
+                **dict(row),
+                "prerequisites": json.loads(row["prerequisites"]),
+                "budget_hint": json.loads(row["budget_hint"]),
+            }
+        )
+
+    def insert_validation_result(self, result: ValidationResult) -> None:
+        data = result.to_dict()
+        data["evidence_refs"] = _json(data["evidence_refs"])
+        data["observations"] = _json(data["observations"])
+        with self.connect() as conn:
+            conn.execute(
+                "insert into validation_results values (:id, :task_id, :status, :confidence, :evidence_refs, "
+                ":observations, :created_at)",
+                data,
+            )
+
+    def list_validation_results(self, task_id: str) -> list[ValidationResult]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "select * from validation_results where task_id = ? order by rowid", (task_id,)
+            ).fetchall()
+        return [
+            ValidationResult.from_dict(
+                {**dict(row), "evidence_refs": json.loads(row["evidence_refs"]), "observations": json.loads(row["observations"])}
+            )
+            for row in rows
+        ]
