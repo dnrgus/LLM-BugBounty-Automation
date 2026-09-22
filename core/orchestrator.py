@@ -563,6 +563,7 @@ async def run_live_scan_pipeline(
         target_config=pack_target_config,
         profile=profile,
         external_scan_inputs={k: v for k, v in (external_scan_inputs or {}).items() if v is not None},
+        live_target_url=url,
     )
 
     scan_run_ids = [

@@ -267,6 +267,7 @@ def cmd_discover(args: argparse.Namespace) -> int:
                         selections, testcases, policy, store,
                         target_kind=args.pack_target, target_config=args.pack_target_config,
                         external_scan_inputs=external_scan_inputs,
+                        live_target_url=args.url,
                     )
                 )
                 payload["pack_runs"] = [pack_run.to_dict() for pack_run in pack_runs]

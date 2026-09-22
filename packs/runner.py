@@ -15,12 +15,21 @@ from packs.selector import PackSelection
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from testcase.schema import Testcase
+from tools.dalfox import DALFOX_TOOL
+from tools.nuclei import NUCLEI_TOOL
+from tools.runner import run_external_tool
 
 _EXTERNAL_TOOL_ADAPTERS = {
     "nuclei": NucleiAdapter,
     "dalfox": DalfoxAdapter,
     "trufflehog": TruffleHogAdapter,
 }
+
+# P3.1-3: tools with a real ExternalTool execution contract (tools/runner.py).
+# trufflehog is deliberately absent -- it only has a filesystem-scan mode
+# here (see tools/trufflehog.py), which doesn't fit "run against this live
+# URL" the way nuclei/dalfox do.
+_LIVE_EXTERNAL_TOOLS = {"nuclei": NUCLEI_TOOL, "dalfox": DALFOX_TOOL}
 
 
 @dataclass
@@ -51,6 +60,7 @@ async def run_selected_packs(
     profile: PipelineProfile | None = None,
     external_scan_inputs: dict[str, Path | str] | None = None,
     tool_checker: Callable[[str], ToolStatus] = check_tool,
+    live_target_url: str | None = None,
 ) -> list[PackRunResult]:
     """U7 (design doc section 9): connects each *selected* Attack Pack
     (U6) to a real execution path -- "외부 툴 + 자체 verifier를 pack으로
@@ -64,14 +74,16 @@ async def run_selected_packs(
       i.e. the "자체 verifier" this project already has) exactly as a
       normal scan would.
     - External-tool packs (web_scan/nuclei, api_fuzz/dalfox,
-      secret_scan/trufflehog) are never invoked directly -- this
-      project has never shelled out to live pentesting binaries
-      against a real target (see core/orchestrator.py's
-      _normalize_external_scan), and U7 does not change that. A pack
-      is "ran" only when its results file is supplied by the caller;
-      otherwise the reason is reported explicitly (tool not installed,
-      or installed but no results file yet) rather than silently
-      skipped.
+      secret_scan/trufflehog): if a results file is supplied, that's
+      always used (a program's own recon workflow producing a results
+      file stays authoritative). Otherwise, as of P3.1-3 (roadmap
+      v3.1.0), nuclei/dalfox actually run live against `live_target_url`
+      when installed and a Policy/Scope check on that URL passes (see
+      tools/runner.py) -- no longer parser-only for those two. trufflehog
+      still has no live-URL mode here (see tools/trufflehog.py) and stays
+      results-file-only. Every other case (tool not installed, no results
+      file and no live_target_url) is reported explicitly rather than
+      silently skipped.
 
     Only *selected* packs (selection.selected is True) are considered --
     U6's reasons for skipping the rest are already recorded on the
@@ -89,7 +101,11 @@ async def run_selected_packs(
             if tool_id == "testcase_suite":
                 testcase_suite_categories.update(pack.testing_categories)
                 continue
-            results.append(_run_external_tool_pack(pack.id, tool_id, external_scan_inputs, tool_checker))
+            results.append(
+                await _run_external_tool_pack(
+                    pack.id, tool_id, external_scan_inputs, tool_checker, policy, live_target_url
+                )
+            )
 
     if testcase_suite_categories:
         results.append(
@@ -131,21 +147,28 @@ async def _run_testcase_suite_packs(
     )
 
 
-def _run_external_tool_pack(
+async def _run_external_tool_pack(
     pack_id: str,
     tool_id: str,
     external_scan_inputs: dict[str, Path | str],
     tool_checker: Callable[[str], ToolStatus],
+    policy: PolicyEngine,
+    live_target_url: str | None,
 ) -> PackRunResult:
     path = external_scan_inputs.get(tool_id)
-    if path is None:
-        status = tool_checker(tool_id)
-        if status.available:
-            detail = (
-                f"{tool_id} is installed ({status.path}) but no results file was supplied -- "
-                f"run {tool_id} against the discovered in-scope endpoints and pass its output"
-            )
-            return PackRunResult(pack_id=pack_id, tool_id=tool_id, status="skipped_no_results_file", detail=detail)
+    if path is not None:
+        adapter_cls = _EXTERNAL_TOOL_ADAPTERS[tool_id]
+        findings = adapter_cls().parse_file(path, run_id=new_id("run"), target_id="pack_run")
+        return PackRunResult(
+            pack_id=pack_id,
+            tool_id=tool_id,
+            status="ran",
+            detail=f"parsed {len(findings)} finding(s) from {tool_id} output",
+            summary={"count": len(findings), "findings": [finding.to_dict() for finding in findings]},
+        )
+
+    status = tool_checker(tool_id)
+    if not status.available:
         return PackRunResult(
             pack_id=pack_id,
             tool_id=tool_id,
@@ -153,12 +176,19 @@ def _run_external_tool_pack(
             detail=f"{tool_id} is not installed on this machine",
         )
 
-    adapter_cls = _EXTERNAL_TOOL_ADAPTERS[tool_id]
-    findings = adapter_cls().parse_file(path, run_id=new_id("run"), target_id="pack_run")
-    return PackRunResult(
-        pack_id=pack_id,
-        tool_id=tool_id,
-        status="ran",
-        detail=f"parsed {len(findings)} finding(s) from {tool_id} output",
-        summary={"count": len(findings), "findings": [finding.to_dict() for finding in findings]},
+    live_tool = _LIVE_EXTERNAL_TOOLS.get(tool_id)
+    if live_tool is not None and live_target_url is not None:
+        execution = await run_external_tool(
+            live_tool, live_target_url, policy, run_id=new_id("run"), target_id="pack_run_live"
+        )
+        summary = {"execution": execution.to_dict()}
+        if execution.status == "ran":
+            summary["count"] = len(execution.findings)
+            summary["findings"] = [finding.to_dict() for finding in execution.findings]
+        return PackRunResult(pack_id=pack_id, tool_id=tool_id, status=execution.status, detail=execution.detail, summary=summary)
+
+    detail = (
+        f"{tool_id} is installed ({status.path}) but no results file was supplied -- "
+        f"run {tool_id} against the discovered in-scope endpoints and pass its output"
     )
+    return PackRunResult(pack_id=pack_id, tool_id=tool_id, status="skipped_no_results_file", detail=detail)
