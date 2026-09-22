@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from pathlib import Path
 
+import httpx
+
 from adapters.llm.pyrit import PyRITAdapter
 from adapters.scanner.dalfox import DalfoxAdapter
 from adapters.scanner.nuclei import NucleiAdapter
@@ -29,6 +31,10 @@ from executor.runner import Executor
 from findings.dedup import base_testcase_id, cluster_findings
 from findings.report import write_cluster_report
 from judges.ensemble import JudgeEnsemble
+from live.auto_profile import auto_profile_candidates
+from live.classify import classify_items
+from live.discovery import discover_target
+from packs.selector import select_packs
 from recon.pipeline import build_asset_map
 from reporting.evidence import write_evidence_bundle
 from reporting.reporter import write_json_report, write_markdown_report
@@ -506,6 +512,92 @@ async def run_full_pipeline(
     result["reports"] = all_reports
     result["finding_count"] = len(combined_findings)
     return result
+
+
+async def run_live_scan_pipeline(
+    policy: PolicyEngine,
+    testcases: list[Testcase],
+    store: SQLiteStore,
+    profile: PipelineProfile,
+    url: str,
+    max_pages: int = 5,
+    auto_profile: bool = False,
+    pack_target: str | None = None,
+    pack_target_config: Path | str | None = None,
+    pack_budget_requests: int | None = None,
+    external_scan_inputs: dict[str, Path | str | None] | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, object]:
+    """P3.1-1 (roadmap v3.1.0 Operational Pipeline): `scan <url>`'s LIVE
+    MODE entry point. Wires U4-U7 (discover -> classify -> auto-profile ->
+    pack select -> pack run) into one call by reusing each stage's
+    existing internal API, instead of requiring separate
+    `discover --classify --auto-profile --select-packs --run-packs`
+    invocations. Purely additive: run_full_pipeline (the fixture-driven
+    --profile path used by the golden regression baseline) is untouched.
+    """
+    # Local import: packs.runner imports run_sample_pipeline from this
+    # module, so importing it at module scope here would be circular.
+    from packs.runner import run_selected_packs
+
+    store.initialize()
+    discovery = await discover_target(url, policy, max_pages=max_pages, transport=transport)
+    candidates = classify_items(discovery.items)
+
+    auto_profile_results = (
+        await auto_profile_candidates(candidates, policy, store, transport=transport) if auto_profile else []
+    )
+
+    budget = AttackBudget(max_requests=pack_budget_requests) if pack_budget_requests else None
+    target_kinds = {candidate.kind for candidate in candidates}
+    selections = select_packs(target_kinds, policy, budget=budget)
+
+    pack_runs = await run_selected_packs(
+        selections,
+        testcases,
+        policy,
+        store,
+        target_kind=pack_target,
+        target_config=pack_target_config,
+        profile=profile,
+        external_scan_inputs={k: v for k, v in (external_scan_inputs or {}).items() if v is not None},
+    )
+
+    scan_run_ids = [
+        str(pack_run.summary["run_id"])
+        for pack_run in pack_runs
+        if pack_run.tool_id == "testcase_suite" and pack_run.summary is not None
+    ]
+    findings = (
+        [
+            finding
+            for finding in store.list_findings(scan_run_ids)
+            if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}
+        ]
+        if scan_run_ids
+        else []
+    )
+    reports: list[str] = []
+    for pack_run in pack_runs:
+        if pack_run.tool_id == "testcase_suite" and pack_run.summary is not None:
+            reports.extend(pack_run.summary.get("reports", []))
+
+    combined_run = Run(target_id="live_scan", policy_hash=policy.policy_hash, fingerprint=f"live_scan:{url}")
+    clusters = _cluster_and_report(combined_run, findings, reports)
+
+    return {
+        "mode": "live",
+        "url": url,
+        "profile": profile.name,
+        "discovery": discovery.to_dict(),
+        "classification": [candidate.to_dict() for candidate in candidates],
+        "auto_profile": [result.to_dict() for result in auto_profile_results],
+        "pack_selection": [selection.to_dict() for selection in selections],
+        "pack_runs": [pack_run.to_dict() for pack_run in pack_runs],
+        "finding_count": len(findings),
+        "clusters": clusters,
+        "reports": reports,
+    }
 
 
 async def run_profile_target(

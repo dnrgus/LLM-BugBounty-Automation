@@ -53,6 +53,10 @@
 - Event 모델 + 범용 WebSocket 전송 (`adapter: websocket`): 스트리밍 대상을 위한 네 번째 어댑터 종류. START/TOKEN/RETRIEVAL/TOOL_CALL/FINAL/ERROR 형식 Event 모델로 임의의 WS 프레임 형식(설정 가능한 `type_field`/`text_field`/`*_types`)을 해석해 하나의 TargetResponse로 합침. `config/targets/websocket.example.yaml` 참고 — Scope/Policy 엔진도 `ws://`/`wss://` 스킴을 인식하도록 함께 확장
 - Plugin SDK + Browser 어댑터 (`adapter: browser`): `targets/config.py`를 건드리지 않고도 새 adapter 종류를 등록할 수 있는 plugin registry(`plugins/registry.py`, 내장 plugin 또는 `llmbb.target_adapters` entry point로 서드파티 plugin도 등록 가능). API가 전혀 없는 채팅 UI를 위한 Playwright 기반 브라우저 자동화 어댑터가 기본 내장 plugin으로 등록되어 있음 — Playwright는 선택 설치(`pip install playwright && playwright install chromium`)이며, 설치 안 된 상태에서도 모듈 로드 자체는 항상 정상 동작하고 실제 사용 시점에만 명확한 에러 발생
 
+**v3.1.0 Operational Pipeline 진행 중** (기능 모음을 하나의 실전 운용 파이프라인으로 연결):
+
+- Scan Orchestrator 통합 (P3.1-1, `scan <url>`): LIVE MODE 분석의 단일 진입점. 기존에는 `discover --classify --auto-profile --select-packs --run-packs`를 따로 조합해야 했던 것을, `scan <url>` 한 번으로 discover → classify → (선택) auto-profile → pack 선택 → pack 실행(testcase_suite는 Executor/Judge/Reproducer로, 외부 툴은 결과 파일이 있을 때만) → finding dedup/root cause cluster → report까지 연결. `--profile`을 생략하면 `quick`으로 기본 동작하며, URL을 생략하면 기존 fixture 기반 `--profile` 파이프라인이 그대로(동작 변경 없이) 실행됨
+
 ## 빠른 시작
 
 ```bash
@@ -208,6 +212,12 @@ python main.py scan --profile full
 # 단일 프로필만 빠르게 실행하고 싶을 때
 python main.py scan --profile web
 python main.py scan --profile agent
+
+# LIVE MODE scan (v3.1.0 P3.1-1 Scan Orchestrator): scan에 URL을 주면
+# discover -> classify -> select-packs -> run-packs 를 한 번에 연결해서 실행
+# (기존 discover --classify --auto-profile --select-packs --run-packs 조합과 동일한 결과)
+python main.py scan https://target.example.com --scope config/my-scope.yaml \
+  --pack-target openai --pack-target-config config/targets/my-target.yaml
 ```
 
 ## 산출물
