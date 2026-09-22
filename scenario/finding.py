@@ -46,7 +46,9 @@ def promote_scenario_result(scenario: Scenario, result: ScenarioResult, store: S
                 "judgement": step_result.judgement_reason,
             },
         )
-        evidence = store.record_evidence(result.run_id, "scenario_response", evidence_bundle.sanitized_path)
+        evidence = store.record_evidence(
+            result.run_id, "scenario_response", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
+        )
         finding = Finding(
             run_id=result.run_id,
             testcase_id=f"{scenario.id}:{step_result.step_id}",

@@ -192,7 +192,9 @@ class SQLiteStore:
                   kind text not null,
                   path text not null,
                   sha256 text not null,
-                  sanitized integer not null
+                  sanitized integer not null,
+                  raw_path text,
+                  raw_sha256 text
                 );
                 create table if not exists reproductions (
                   id text primary key,
@@ -462,14 +464,40 @@ class SQLiteStore:
                 data,
             )
 
-    def record_evidence(self, run_id: str, kind: str, path: Path) -> Evidence:
-        evidence = Evidence(run_id=run_id, kind=kind, path=str(path), sha256=sha256_file(path), sanitized=True)
+    def record_evidence(self, run_id: str, kind: str, path: Path, raw_path: Path | None = None) -> Evidence:
+        evidence = Evidence(
+            run_id=run_id,
+            kind=kind,
+            path=str(path),
+            sha256=sha256_file(path),
+            sanitized=True,
+            raw_path=str(raw_path) if raw_path is not None else None,
+            raw_sha256=sha256_file(raw_path) if raw_path is not None and Path(raw_path).exists() else None,
+        )
+        data = {**asdict(evidence), "sanitized": 1}
         with self.connect() as conn:
+            columns = {row["name"] for row in conn.execute("pragma table_info(evidence)").fetchall()}
+            if "raw_path" not in columns:
+                data.pop("raw_path")
+                data.pop("raw_sha256")
+                conn.execute(
+                    "insert into evidence(id, run_id, kind, path, sha256, sanitized) "
+                    "values (:id, :run_id, :kind, :path, :sha256, :sanitized)",
+                    data,
+                )
+                return evidence
             conn.execute(
-                "insert into evidence values (:id, :run_id, :kind, :path, :sha256, :sanitized)",
-                {**asdict(evidence), "sanitized": 1},
+                "insert into evidence values (:id, :run_id, :kind, :path, :sha256, :sanitized, :raw_path, :raw_sha256)",
+                data,
             )
         return evidence
+
+    def list_evidence(self, run_id: str) -> list[sqlite3.Row]:
+        """P3.4-3: raw material for reporting/integrity.py's per-run
+        manifest -- every Evidence row recorded under `run_id`, in a
+        stable order (so the manifest is deterministic)."""
+        with self.connect() as conn:
+            return conn.execute("select * from evidence where run_id = ? order by id", (run_id,)).fetchall()
 
     def record_report(self, run_id: str, path: Path) -> None:
         report = ReportRecord(run_id=run_id, path=str(path))

@@ -41,6 +41,7 @@ from live.discovery import discover_target
 from packs.selector import select_packs
 from recon.pipeline import build_asset_map
 from reporting.evidence import write_evidence_bundle
+from reporting.integrity import build_run_manifest, write_manifest
 from reporting.reporter import write_json_report, write_markdown_report
 from reproduction.minimal_poc import minimize_poc
 from reproduction.reproducer import Reproducer
@@ -228,6 +229,16 @@ async def run_sample_pipeline(
 
     clusters = _cluster_and_report(run, reportable_findings, reports)
 
+    # P3.4-3 (roadmap v3.4.0 Production Hardening): a per-run SHA-256
+    # manifest over every Evidence file this run recorded, re-hashed at
+    # report time and compared against what was recorded when written --
+    # a mismatch (tamper_detected) is surfaced rather than silently
+    # trusted. Always references the sanitized path as the primary
+    # artifact; the raw path/hash are provenance, not what a report
+    # should link to.
+    manifest = build_run_manifest(store, run.id)
+    manifest_path = write_manifest(Path("reports/shareable"), manifest)
+
     return {
         "run_id": run.id,
         "selected_testcases": [case.id for case in selected],
@@ -243,6 +254,8 @@ async def run_sample_pipeline(
         "clusters": clusters,
         "budget": budget.usage,
         "cancelled": cancelled,
+        "artifact_manifest": str(manifest_path),
+        "artifact_manifest_tamper_detected": manifest.any_tamper_detected,
     }
 
 
@@ -342,7 +355,7 @@ async def _process_case(
             "environment_fingerprint": run.fingerprint,
         },
     )
-    evidence = store.record_evidence(run.id, "llm_response", evidence_bundle.sanitized_path)
+    evidence = store.record_evidence(run.id, "llm_response", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path)
     if not judgement.passed:
         return None
 
@@ -970,7 +983,9 @@ async def run_reproduce_finding(
                 "removed_segments": poc.removed_segments,
             },
         )
-        evidence = store.record_evidence(finding.run_id, "minimal_poc", evidence_bundle.sanitized_path)
+        evidence = store.record_evidence(
+            finding.run_id, "minimal_poc", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
+        )
         result["minimal_poc_evidence_id"] = evidence.id
 
     return result
