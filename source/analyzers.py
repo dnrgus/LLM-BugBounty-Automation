@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 
 from attack_surface.models import AttackSurfaceItem
+from source.ai.python import find_ai_capability_hints
+from source.auth.python import find_auth_guards
 from source.dataflow.python import trace_dataflow
 from source.ingestion import SourceFile
 
@@ -32,32 +34,18 @@ _SECRET_PATTERNS = [
     ("private_key_block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 ]
 
-_LLM_SDK_PATTERNS = [
-    re.compile(r"\bimport\s+openai\b"),
-    re.compile(r"\bfrom\s+openai\s+import"),
-    re.compile(r"\bimport\s+anthropic\b"),
-    re.compile(r"\bfrom\s+anthropic\s+import"),
-    re.compile(r"google\.generativeai"),
-    re.compile(r"ChatCompletion\.create"),
-    re.compile(r"client\.messages\.create"),
-    re.compile(r"chat\.completions\.create"),
-]
+def analyze_files(files: list[SourceFile], routes: list[AttackSurfaceItem] | None = None) -> list[AttackSurfaceItem]:
+    """`routes` (extract_routes' own output) is optional but, when given,
+    lets P3.2-4's auth-guard check know which functions are actually
+    route handlers -- see _find_auth_guards.
+    """
+    route_handlers_by_file: dict[str, set[str]] = {}
+    for route_item in routes or []:
+        handler = route_item.metadata.get("handler")
+        file = route_item.metadata.get("file")
+        if handler and file:
+            route_handlers_by_file.setdefault(str(file), set()).add(str(handler))
 
-_RAG_PATTERNS = [
-    re.compile(r"(?i)vectorstore|vector_store"),
-    re.compile(r"(?i)embeddings?\."),
-    re.compile(r"(?i)retriever|retrieval_chain"),
-    re.compile(r"(?i)langchain"),
-]
-
-_AGENT_PATTERNS = [
-    re.compile(r"(?i)function_call|tool_calls?"),
-    re.compile(r"@tool\b"),
-    re.compile(r"(?i)\bmcp\b"),
-]
-
-
-def analyze_files(files: list[SourceFile]) -> list[AttackSurfaceItem]:
     items: list[AttackSurfaceItem] = []
     for source_file in files:
         try:
@@ -69,6 +57,7 @@ def analyze_files(files: list[SourceFile]) -> list[AttackSurfaceItem]:
         items.extend(_find_secrets(source_file, text))
         items.extend(_find_llm_integration(source_file, text))
         items.extend(_find_dataflow_edges(source_file, text))
+        items.extend(_find_auth_guards(source_file, text, route_handlers_by_file.get(str(source_file.path), set())))
     return items
 
 
@@ -167,37 +156,49 @@ def _find_dataflow_edges(source_file: SourceFile, text: str) -> list[AttackSurfa
 
 def _find_llm_integration(source_file: SourceFile, text: str) -> list[AttackSurfaceItem]:
     items: list[AttackSurfaceItem] = []
-    if any(pattern.search(text) for pattern in _LLM_SDK_PATTERNS):
+    for hint in find_ai_capability_hints(str(source_file.path), text):
+        metadata: dict[str, object] = {
+            "file": hint.file,
+            "signals": hint.signals,
+            "dynamic_validation_hint": hint.dynamic_validation_hint,
+        }
+        if hint.kind == "llm":
+            metadata["llm_detected"] = True
         items.append(
             AttackSurfaceItem(
                 source_type="source",
-                asset_type="llm",
-                location=str(source_file.path),
-                metadata={"file": str(source_file.path), "llm_detected": True},
-                confidence=0.75,
-                evidence_refs=[str(source_file.path)],
+                asset_type=hint.kind,
+                location=hint.file,
+                metadata=metadata,
+                confidence=hint.confidence,
+                evidence_refs=[hint.file],
             )
         )
-    if any(pattern.search(text) for pattern in _RAG_PATTERNS):
+    return items
+
+
+def _find_auth_guards(source_file: SourceFile, text: str, route_handlers: set[str]) -> list[AttackSurfaceItem]:
+    """P3.2-4 (roadmap v3.2.0 Source Intelligence): a route-level auth
+    posture *candidate*, never a confirmed absence -- see
+    source/auth/python.py's AuthGuardHint docstring for why.
+    """
+    items: list[AttackSurfaceItem] = []
+    for hint in find_auth_guards(source_file.path, text, route_handlers):
         items.append(
             AttackSurfaceItem(
                 source_type="source",
-                asset_type="rag",
-                location=str(source_file.path),
-                metadata={"file": str(source_file.path)},
-                confidence=0.5,
-                evidence_refs=[str(source_file.path)],
-            )
-        )
-    if any(pattern.search(text) for pattern in _AGENT_PATTERNS):
-        items.append(
-            AttackSurfaceItem(
-                source_type="source",
-                asset_type="agent",
-                location=str(source_file.path),
-                metadata={"file": str(source_file.path)},
-                confidence=0.4,
-                evidence_refs=[str(source_file.path)],
+                asset_type="auth",
+                location=f"{hint.file}:{hint.line}",
+                metadata={
+                    **hint.to_dict(),
+                    "dynamic_validation_hint": (
+                        "before treating guard_detected=False as unauthenticated, send an unauthenticated "
+                        "request to this route and confirm it isn't rejected by middleware or a framework "
+                        "default this static check can't see"
+                    ),
+                },
+                confidence=hint.confidence,
+                evidence_refs=[f"{hint.file}:{hint.line}"],
             )
         )
     return items

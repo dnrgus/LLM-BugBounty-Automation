@@ -15,7 +15,8 @@ def audit_source(root: Path | str, max_files: int = 2000) -> dict[str, object]:
     U8), not this module's.
     """
     ingestion = ingest_source(root, max_files=max_files)
-    items = extract_routes(ingestion.files) + analyze_files(ingestion.files)
+    routes = extract_routes(ingestion.files)
+    items = routes + analyze_files(ingestion.files, routes)
 
     by_asset_type: dict[str, int] = {}
     for item in items:

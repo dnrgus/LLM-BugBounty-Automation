@@ -57,6 +57,8 @@ packages = [
   "source.sources",
   "source.sinks",
   "source.dataflow",
+  "source.auth",
+  "source.ai",
   "scope",
   "targets",
   "testcase",

@@ -113,10 +113,16 @@ def test_audit_source_produces_expected_attack_surface_shape() -> None:
     # request.json.get("message") -> openai.ChatCompletion.create(...,
     # messages=[{"content": message}]) -- on top of the pre-existing
     # unconnected input/sink regex matches.
+    # P3.2-4: both fixture routes lack a recognized auth guard decorator,
+    # so each gets an "auth" candidate hint with detected=False (a
+    # heuristic absence, never a confirmed one -- see
+    # source/auth/python.py's AuthGuardHint docstring).
     assert surface["by_asset_type"] == {
-        "endpoint": 2, "parameter": 2, "function": 1, "secret": 2, "llm": 1, "dataflow": 2,
+        "endpoint": 2, "parameter": 2, "function": 1, "secret": 2, "llm": 1, "dataflow": 2, "auth": 2,
     }
-    assert surface["total"] == 10
+    assert surface["total"] == 12
+    auth_items = [item for item in surface["items"] if item["asset_type"] == "auth"]
+    assert all(item["metadata"]["detected"] is False for item in auth_items)
 
 
 def test_audit_source_dataflow_edges_carry_file_and_line_evidence() -> None:
