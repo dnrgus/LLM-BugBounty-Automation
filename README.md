@@ -63,6 +63,7 @@
 
 - Python AST 파서 (P3.2-1, `source/parsers/python.py`): Flask/FastAPI route를 표준 `ast` 모듈로 파싱해 method/path/handler/file/line을 추출 — 기존 정규식 추출기와 달리 `methods=[...]` kwarg를 실제로 읽어서 method를 정확히 판별. 파싱 실패(SyntaxError) 시 해당 파일만 기존 정규식 추출기로 자동 fallback
 - JavaScript/TypeScript AST 파서 (P3.2-2, `source/parsers/javascript.py`, 선택 설치 `pip install '.[jsts]'`): tree-sitter로 Express(`app.get/post/put/delete/patch`)와 Next.js API route(Pages Router `pages/api/**`, App Router `app/**/route.ts`의 `export function GET/POST/...`)를 추출, 동적 세그먼트(`[id]` → `:id`, `[...slug]` → `*slug`)도 변환. tree-sitter 미설치 시에도 모듈 로드는 항상 정상 동작하고 해당 파일만 정규식 fallback으로 처리(Playwright와 동일한 optional-dependency 패턴)
+- Source/Sink Lightweight Dataflow (P3.2-3, `source/dataflow/python.py`): request.args/json/form/cookies/headers 같은 실제 소스에서 SQL(`execute`/`query`)·명령 실행(`os.system`/`subprocess.*`)·역직렬화(`pickle`/`yaml.load`)·템플릿 인젝션(`render_template_string`)·파일 접근(`open`)·SSRF(`requests.*`/`httpx.*`)·LLM prompt sink(`ChatCompletion.create` 등, list/dict 리터럴 내부까지 추적)로 실제로 도달하는지를 함수 단위 + 1-hop interprocedural로 추적. 단순 정규식 매치(기존 `_find_sinks`)와 별도로 `asset_type: dataflow`로 file/line 근거가 있는 구체적 증거만 별도 표시
 
 ## 빠른 시작
 
