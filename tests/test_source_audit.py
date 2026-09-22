@@ -39,6 +39,39 @@ def test_extract_routes_finds_flask_endpoints() -> None:
     assert ast_routes["/api/admin/run"].metadata["handler"] == "run_command"
 
 
+def test_extract_routes_finds_express_endpoints_via_ast() -> None:
+    import pytest
+
+    pytest.importorskip("tree_sitter")
+    result = ingest_source(Path("tests/fixtures/source/express_app"))
+    assert "express" in result.frameworks
+    routes = extract_routes(result.files)
+    by_location = {item.location: item for item in routes}
+    assert by_location["/api/chat"].metadata["method"] == "GET"
+    assert by_location["/api/chat"].metadata["handler"] == "chat"
+    assert by_location["/api/admin/run"].metadata["method"] == "POST"
+    assert all(item.metadata["extraction"] == "ast" for item in routes)
+
+
+def test_extract_routes_falls_back_to_regex_when_jsts_extra_is_not_installed(monkeypatch, tmp_path: Path) -> None:
+    import source.routes as routes_module
+    from source.ingestion import SourceFile
+    from source.models import ParserResult
+
+    class _AlwaysFailingParser:
+        language = "javascript"
+
+        def parse_file(self, path, text):  # noqa: ANN001 -- matches SourceParser protocol
+            return ParserResult(language="javascript", errors=["tree-sitter is not installed (pip install '.[jsts]')"])
+
+    monkeypatch.setitem(routes_module._AST_PARSERS, "javascript", _AlwaysFailingParser())
+    js_file = tmp_path / "legacy.js"
+    js_file.write_text("app.get('/api/legacy', handler);\n", encoding="utf-8")
+
+    items = routes_module.extract_routes([SourceFile(path=js_file, language="javascript")])
+    assert any(item.location == "/api/legacy" and item.metadata["extraction"] == "pattern" for item in items)
+
+
 def test_extract_routes_falls_back_to_regex_for_a_python_file_ast_cannot_parse(tmp_path: Path) -> None:
     from source.ingestion import SourceFile
 

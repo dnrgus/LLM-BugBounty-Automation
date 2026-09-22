@@ -42,7 +42,7 @@
 **v3.0 Universal Bug Bounty Architecture 마이그레이션 진행 중** (URL-only/Source-only/Hybrid 대상까지 하나의 Core로 처리하는 확장 — 기존 기능은 전부 보존):
 
 - AttackSurface 모델: LIVE(Discovery)와 SOURCE(정적분석) 결과가 서로 의존하지 않고 합류하는 공통 중간표현(`AttackSurfaceItem`). 같은 (method, path) endpoint나 (name, position) parameter는 자동 merge, static+live 동시 관측 시 confidence 상승, 충돌하는 메타데이터는 덮어쓰지 않고 `provenance`에 양쪽 다 보존
-- SOURCE MODE (`audit <path>`): 소스 트리를 정적 분석해 언어/프레임워크 감지, route(Flask/FastAPI/Express/Django) 추출, input source(request.args/json/body 등)·위험 sink(eval/os.system/pickle.loads/SQL 문자열 조합 등)·secret(AWS key/PEM/generic API key, 값 자체는 절대 저장 안 함)·LLM/RAG/Agent SDK 연동 패턴까지 탐지
+- SOURCE MODE (`audit <path>`): 소스 트리를 정적 분석해 언어/프레임워크 감지, route(Flask/FastAPI/Express/Django, Next.js Pages/App Router) 추출, input source(request.args/json/body 등)·위험 sink(eval/os.system/pickle.loads/SQL 문자열 조합 등)·secret(AWS key/PEM/generic API key, 값 자체는 절대 저장 안 함)·LLM/RAG/Agent SDK 연동 패턴까지 탐지. Python/JS/TS는 AST 기반(v3.2.0, 아래 참고)이고 나머지는 정규식 기반
 - LIVE MODE (`discover <url>`): URL만 갖고 있는 대상을 안전하게 passive crawl — GET/HEAD만 사용하고 공격 payload는 절대 전송하지 않음. 페이지 fingerprint(status/title/서버 헤더), form/인증 힌트(password form, set-cookie, www-authenticate), JS에서 추출한 API path·WebSocket URL·노출된 source map, AI/LLM 관련 키워드 힌트를 `AttackSurfaceItem`으로 수집. 발견된 링크/스크립트도 전부 다시 Scope/Policy 검증을 통과해야 fetch됨 (동일 출처 여부가 아니라 Scope 설정이 유일한 기준)
 - Auto Profiler (`discover --classify` / `--auto-profile`): LIVE MODE 결과를 web/api/graphql/llm/rag/agent/websocket 후보로 분류. `--auto-profile`은 그중 llm/api 후보를 기존 Capability Probe(`core/profiler.py`)로 연결해 실제로 찔러봄 — 스키마를 모르는 블랙박스 엔드포인트라 몇 가지 흔한 요청/응답 형태를 순서대로 시도하는 best-effort이며, 모든 시도는 다시 한 번 독립적으로 Scope/Policy 검증을 통과해야 함
 - Pack Selector (`discover --select-packs`): 분류된 target 능력(web/api/graphql/llm/rag/agent/websocket) × Policy(`testing.*` 카테고리 허용 여부) × Budget(예상 요청 비용 대비 잔여 예산)을 기준으로 어떤 Attack Pack을 실행할지 결정. 적용 대상이 아니거나, 정책이 막거나, 예산이 부족한 경우도 전부 이유와 함께 기록 (discovery의 `skipped_out_of_scope`와 동일한 투명성 원칙)
@@ -58,6 +58,11 @@
 - Scan Orchestrator 통합 (P3.1-1, `scan <url>`): LIVE MODE 분석의 단일 진입점. 기존에는 `discover --classify --auto-profile --select-packs --run-packs`를 따로 조합해야 했던 것을, `scan <url>` 한 번으로 discover → classify → (선택) auto-profile → pack 선택 → pack 실행(testcase_suite는 Executor/Judge/Reproducer로, 외부 툴은 결과 파일이 있을 때만) → finding dedup/root cause cluster → report까지 연결. `--profile`을 생략하면 `quick`으로 기본 동작하며, URL을 생략하면 기존 fixture 기반 `--profile` 파이프라인이 그대로(동작 변경 없이) 실행됨
 - Scenario → Finding Lifecycle 연결 (P3.1-2): `run-scenario`가 flag된 각 step을 `reproduction_spec(type=scenario)`을 가진 일반 Finding으로 승격 — scenario 전체(steps/prompts/session_ref)를 spec에 그대로 스냅샷하므로 `reproduce <finding-id>`가 원본 `--scenarios` YAML 없이도 나중에 재현 가능. 재현 시 전체 scenario를 다시 실행하고(step 하나만 격리하면 이전 step이 만든 상태가 사라짐), flag된 step의 prompt만 canary-neutralized/benign 버전으로 바꾼 control replay와 비교하는 control-vs-attack 검증을 거침
 - External ToolRunner 실행 계층 (P3.1-3, `tools/runner.py`): Nuclei/Dalfox가 로컬에 설치돼 있고 결과 파일이 안 주어졌다면(`scan <url>` / `discover --run-packs`), 더 이상 "설치는 됐지만 결과 파일 없음"으로만 멈추지 않고 Policy/Scope 통과한 URL에 대해 실제로 실행 — `subprocess`는 항상 `shell=False`(argv 리스트, 셸 문자열 없음), timeout 시 프로세스를 kill, 실행한 버전을 기록. TruffleHog는 URL fetch 모드가 없어(파일시스템 스캔 전용) 이번 단계에서는 여전히 결과 파일 방식만 지원. 미설치 툴은 여전히 scan 전체를 깨지 않고 `skipped_tool_not_installed`로 기록
+
+**v3.2.0 Source Intelligence 진행 중** (SOURCE MODE를 패턴 매칭에서 구조 이해로 승격):
+
+- Python AST 파서 (P3.2-1, `source/parsers/python.py`): Flask/FastAPI route를 표준 `ast` 모듈로 파싱해 method/path/handler/file/line을 추출 — 기존 정규식 추출기와 달리 `methods=[...]` kwarg를 실제로 읽어서 method를 정확히 판별. 파싱 실패(SyntaxError) 시 해당 파일만 기존 정규식 추출기로 자동 fallback
+- JavaScript/TypeScript AST 파서 (P3.2-2, `source/parsers/javascript.py`, 선택 설치 `pip install '.[jsts]'`): tree-sitter로 Express(`app.get/post/put/delete/patch`)와 Next.js API route(Pages Router `pages/api/**`, App Router `app/**/route.ts`의 `export function GET/POST/...`)를 추출, 동적 세그먼트(`[id]` → `:id`, `[...slug]` → `*slug`)도 변환. tree-sitter 미설치 시에도 모듈 로드는 항상 정상 동작하고 해당 파일만 정규식 fallback으로 처리(Playwright와 동일한 optional-dependency 패턴)
 
 ## 빠른 시작
 

@@ -5,6 +5,7 @@ import re
 from attack_surface.models import AttackSurfaceItem
 from source.ingestion import SourceFile
 from source.models import RouteNode
+from source.parsers.javascript import JavaScriptTypeScriptParser
 from source.parsers.python import PythonASTParser
 
 # Pattern-based, not AST-based (design doc section 8's "초기 범위"): high
@@ -22,19 +23,24 @@ _DJANGO_PATH = re.compile(r'\bpath\(\s*r?["\']([^"\']*)["\']')
 
 _ROUTE_LANGUAGES = {"python", "javascript", "typescript"}
 
-_python_ast_parser = PythonASTParser()
+_js_ts_ast_parser = JavaScriptTypeScriptParser()
+_AST_PARSERS = {
+    "python": PythonASTParser(),
+    "javascript": _js_ts_ast_parser,
+    "typescript": _js_ts_ast_parser,
+}
 
 
 def extract_routes(files: list[SourceFile]) -> list[AttackSurfaceItem]:
-    """P3.2-1 (roadmap v3.2.0 Source Intelligence): Python files are
-    parsed with the AST-based PythonASTParser first (source/parsers/
-    python.py) -- "구조 이해" instead of pattern matching. A Python file
-    the parser can't handle (ParserResult.errors non-empty, e.g. a
-    genuine SyntaxError) falls back to this module's original regex
-    extractor for *that file only*, so one bad file degrades gracefully
-    instead of losing route coverage for the whole tree. Every other
-    language (JS/TS for now) still goes through the regex path only --
-    unchanged from before this phase.
+    """P3.2-1/P3.2-2 (roadmap v3.2.0 Source Intelligence): every route
+    language has an AST parser (source/parsers/python.py,
+    source/parsers/javascript.py) tried first -- "구조 이해" instead of
+    pattern matching. A file the parser can't handle
+    (ParserResult.errors non-empty -- a genuine SyntaxError, or, for
+    JS/TS, tree-sitter's optional `jsts` extra not being installed)
+    falls back to this module's original regex extractor for *that file
+    only*, so one bad file or a missing optional dependency degrades
+    gracefully instead of losing route coverage for the whole tree.
     """
     items: list[AttackSurfaceItem] = []
     regex_fallback_files: list[SourceFile] = []
@@ -46,14 +52,12 @@ def extract_routes(files: list[SourceFile]) -> list[AttackSurfaceItem]:
             text = source_file.path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        if source_file.language == "python":
-            result = _python_ast_parser.parse_file(source_file.path, text)
-            if result.errors:
-                regex_fallback_files.append(source_file)
-            else:
-                items.extend(_ast_route_item(source_file, route) for route in result.routes)
-            continue
-        items.extend(_extract_from_text(source_file, text))
+        parser = _AST_PARSERS.get(source_file.language)
+        result = parser.parse_file(source_file.path, text)
+        if result.errors:
+            regex_fallback_files.append(source_file)
+        else:
+            items.extend(_ast_route_item(source_file, route) for route in result.routes)
 
     for source_file in regex_fallback_files:
         try:
