@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from core.cancel import CancellationToken
 from core.tool_doctor import ToolStatus, check_tool, detect_version
 from scope.policy import PolicyEngine
 
@@ -68,6 +69,7 @@ async def run_external_tool(
     target_id: str,
     timeout_seconds: float = 120.0,
     tool_checker: Callable[[str], ToolStatus] = check_tool,
+    cancellation: CancellationToken | None = None,
 ) -> ToolExecutionResult:
     """P3.1-3: runs one real external tool binary against one target,
     gated by Policy/Scope before a single subprocess is spawned.
@@ -76,6 +78,12 @@ async def run_external_tool(
     policy.validate_url -- a local filesystem path (e.g. trufflehog's
     filesystem scan mode) never makes an outbound request, so it isn't a
     Scope decision the same way a live URL target is.
+
+    cancellation (P3.4-2, roadmap v3.4.0 Production Hardening): optional.
+    When given, an explicit cancel() during the subprocess's run kills it
+    immediately (status "cancelled"), the same way an internal timeout
+    already did before this parameter existed -- omitting it keeps the
+    exact original timeout-only behavior.
     """
     status = tool_checker(tool.binary)
     if not status.available:
@@ -102,18 +110,48 @@ async def run_external_tool(
     process = await asyncio.create_subprocess_exec(
         *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.wait()
-        return ToolExecutionResult(
-            tool_id=tool.id,
-            status="timeout",
-            command=command,
-            detail=f"{tool.binary} exceeded {timeout_seconds}s timeout and was killed",
-            duration_seconds=time.monotonic() - started,
+
+    if cancellation is None:
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
+            return ToolExecutionResult(
+                tool_id=tool.id,
+                status="timeout",
+                command=command,
+                detail=f"{tool.binary} exceeded {timeout_seconds}s timeout and was killed",
+                duration_seconds=time.monotonic() - started,
+            )
+    else:
+        communicate_task = asyncio.ensure_future(process.communicate())
+        cancel_wait_task = asyncio.ensure_future(cancellation.wait())
+        done, pending = await asyncio.wait(
+            {communicate_task, cancel_wait_task}, timeout=timeout_seconds, return_when=asyncio.FIRST_COMPLETED
         )
+        for task in pending:
+            task.cancel()
+
+        if communicate_task not in done:
+            process.kill()
+            await process.wait()
+            if cancel_wait_task in done:
+                return ToolExecutionResult(
+                    tool_id=tool.id,
+                    status="cancelled",
+                    command=command,
+                    detail=f"{tool.binary} was cancelled: {cancellation.reason}",
+                    duration_seconds=time.monotonic() - started,
+                )
+            return ToolExecutionResult(
+                tool_id=tool.id,
+                status="timeout",
+                command=command,
+                detail=f"{tool.binary} exceeded {timeout_seconds}s timeout and was killed",
+                duration_seconds=time.monotonic() - started,
+            )
+        stdout_bytes, stderr_bytes = communicate_task.result()
     duration = time.monotonic() - started
     stdout = stdout_bytes.decode("utf-8", errors="replace")
     stderr = stderr_bytes.decode("utf-8", errors="replace")

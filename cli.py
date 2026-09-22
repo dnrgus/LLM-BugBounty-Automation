@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 from pathlib import Path
 
 from adapters.llm.garak import GarakAdapter
@@ -14,6 +15,7 @@ from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from core.budget import AttackBudget
+from core.cancel import CancellationToken
 from core.fingerprint import build_environment_fingerprint
 from core.models import Run
 from core.orchestrator import (
@@ -110,14 +112,24 @@ def cmd_sample_run(args: argparse.Namespace) -> int:
     testcases = load_testcases(args.testcases)
     engine = PolicyEngine.from_yaml(args.scope)
     store = SQLiteStore(args.db)
-    result = asyncio.run(
-        run_sample_pipeline(
-            engine, testcases, store, target_kind=args.target, target_config=args.target_config,
-            resume_run_id=args.resume_run_id,
+
+    # P3.4-2: Ctrl-C sets the cancellation token instead of raising
+    # KeyboardInterrupt -- run_sample_pipeline checks it cooperatively
+    # between testcases and marks the run cancelled (resumable later)
+    # rather than dying mid-write with a stack trace.
+    cancellation = CancellationToken()
+    previous_handler = signal.signal(signal.SIGINT, lambda *_: cancellation.cancel("SIGINT (Ctrl-C)"))
+    try:
+        result = asyncio.run(
+            run_sample_pipeline(
+                engine, testcases, store, target_kind=args.target, target_config=args.target_config,
+                resume_run_id=args.resume_run_id, cancellation=cancellation,
+            )
         )
-    )
+    finally:
+        signal.signal(signal.SIGINT, previous_handler)
     print(_json(result))
-    return 0
+    return 130 if result["cancelled"] else 0
 
 
 def cmd_coverage(args: argparse.Namespace) -> int:

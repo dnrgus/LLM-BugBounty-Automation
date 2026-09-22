@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 from dataclasses import dataclass
 
+from core.cancel import BoundedConcurrency, CancellationToken
 from core.models import ExecutionCheckpoint, Run, Trace, TraceEvent
 from executor.approval import ApprovalGate
 from executor.session import SessionManager
@@ -28,6 +29,8 @@ class Executor:
         store: SQLiteStore,
         options: ExecutorOptions | None = None,
         target_id: str = "target",
+        cancellation: CancellationToken | None = None,
+        concurrency_limit: int | None = None,
     ):
         self.policy = policy
         self.target = target
@@ -35,6 +38,13 @@ class Executor:
         self.approval = ApprovalGate(policy)
         self.options = options or ExecutorOptions()
         self.sessions = SessionManager(target_id=target_id)
+        self.cancellation = cancellation
+        # P3.4-2: defaults to scope config's own limits.concurrency (never
+        # enforced anywhere before this) unless the caller overrides it;
+        # None/0 (the common case today) stays unbounded and behaviorally
+        # identical to before this parameter existed.
+        limit = concurrency_limit if concurrency_limit is not None else policy.config.get("limits", {}).get("concurrency")
+        self._concurrency = BoundedConcurrency(limit)
 
     async def execute(
         self,
@@ -44,6 +54,20 @@ class Executor:
         url: str,
         idempotency_key: str | None = None,
         session_id: str | None = None,
+    ) -> TargetResponse:
+        if self.cancellation is not None:
+            self.cancellation.raise_if_cancelled()
+        async with self._concurrency:
+            return await self._execute(run, trace, testcase, url, idempotency_key, session_id)
+
+    async def _execute(
+        self,
+        run: Run,
+        trace: Trace,
+        testcase: Testcase,
+        url: str,
+        idempotency_key: str | None,
+        session_id: str | None,
     ) -> TargetResponse:
         idempotency_key = idempotency_key or self._idempotency_key(run, trace, testcase)
         previous = self.store.get_checkpoint(idempotency_key)

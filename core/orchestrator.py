@@ -13,6 +13,7 @@ from attack_surface.models import AttackSurfaceItem
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
 from core.budget import AttackBudget
+from core.cancel import CancellationToken, OperationCancelled
 from core.checkpoint import compute_config_fingerprint
 from core.fingerprint import build_environment_fingerprint
 from core.models import (
@@ -68,6 +69,7 @@ async def run_sample_pipeline(
     profile: PipelineProfile | None = None,
     target_config: Path | str | None = None,
     resume_run_id: str | None = None,
+    cancellation: CancellationToken | None = None,
 ) -> dict[str, object]:
     """resume_run_id (P3.4-1, roadmap v3.4.0 Production Hardening): opt-in
     only. When given, this call reuses that exact run_id (instead of a
@@ -140,6 +142,7 @@ async def run_sample_pipeline(
         store=store,
         target_id=target_metadata.id,
         options=profile.executor if profile is not None else None,
+        cancellation=cancellation,
     )
     judges = JudgeEnsemble(profile.judges) if profile is not None else JudgeEnsemble.default()
     reproducer = Reproducer(
@@ -164,10 +167,14 @@ async def run_sample_pipeline(
     executed_testcases: list[str] = []
 
     completed_step_ids = resume_decision.completed_step_ids if resume_decision is not None else frozenset()
+    cancelled = False
     for case in selected:
         if case.id in completed_step_ids:
             executed_testcases.append(case.id)
             continue
+        if cancellation is not None and cancellation.is_cancelled:
+            cancelled = True
+            break
         decision = budget.check(category=case.category)
         if not decision.allowed:
             break
@@ -192,6 +199,9 @@ async def run_sample_pipeline(
             consecutive_target_errors = 0
             if run_state_store is not None:
                 run_state_store.mark_step_completed(run.id, case.id)
+        except OperationCancelled:
+            cancelled = True
+            break
         except TargetError:
             consecutive_target_errors += 1
             if consecutive_target_errors >= _MAX_CONSECUTIVE_TARGET_ERRORS:
@@ -200,6 +210,9 @@ async def run_sample_pipeline(
     else:
         if run_state_store is not None:
             run_state_store.mark_run_completed(run.id)
+
+    if cancelled and run_state_store is not None:
+        run_state_store.mark_run_cancelled(run.id)
 
     if resume_decision is not None and resume_decision.completed_step_ids:
         # Cumulative across every invocation under this run_id, not just
@@ -229,6 +242,7 @@ async def run_sample_pipeline(
         "reproductions": reproduction_summary,
         "clusters": clusters,
         "budget": budget.usage,
+        "cancelled": cancelled,
     }
 
 
