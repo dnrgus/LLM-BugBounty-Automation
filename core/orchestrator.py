@@ -538,8 +538,11 @@ async def run_live_scan_pipeline(
     invocations. Purely additive: run_full_pipeline (the fixture-driven
     --profile path used by the golden regression baseline) is untouched.
     """
-    # Local import: packs.runner imports run_sample_pipeline from this
-    # module, so importing it at module scope here would be circular.
+    # Local imports: packs.runner imports run_sample_pipeline from this
+    # module, and findings.external_tool imports packs.runner (for
+    # PackRunResult) -- importing either at module scope here would be
+    # circular.
+    from findings.external_tool import promote_external_tool_findings
     from packs.runner import run_selected_packs
 
     store.initialize()
@@ -566,27 +569,37 @@ async def run_live_scan_pipeline(
         live_target_url=url,
     )
 
+    combined_run = Run(target_id="live_scan", policy_hash=policy.policy_hash, fingerprint=f"live_scan:{url}")
+    store.insert_run(combined_run)
+
     scan_run_ids = [
         str(pack_run.summary["run_id"])
         for pack_run in pack_runs
         if pack_run.tool_id == "testcase_suite" and pack_run.summary is not None
     ]
-    findings = (
-        [
-            finding
-            for finding in store.list_findings(scan_run_ids)
-            if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}
-        ]
-        if scan_run_ids
-        else []
-    )
+    testcase_suite_findings = store.list_findings(scan_run_ids) if scan_run_ids else []
+    reportable_testcase_findings = [
+        finding for finding in testcase_suite_findings if finding.status in {FindingStatus.CONFIRMED, FindingStatus.UNSTABLE}
+    ]
+
+    # P3.1-4 (roadmap v3.1.0): promote external-tool (nuclei/dalfox live
+    # runs, or any file-based tool results) normalized results into
+    # first-class candidate Findings too, instead of leaving them as
+    # opaque JSON inside pack_runs -- every finding scan <url> surfaces
+    # now has a real confirmed/unstable/rejected/candidate status.
+    external_tool_findings = promote_external_tool_findings(pack_runs, combined_run.id, store)
+
+    reportable_findings = reportable_testcase_findings + external_tool_findings
+    finding_status_summary: dict[str, int] = {}
+    for finding in testcase_suite_findings + external_tool_findings:
+        finding_status_summary[finding.status.value] = finding_status_summary.get(finding.status.value, 0) + 1
+
     reports: list[str] = []
     for pack_run in pack_runs:
         if pack_run.tool_id == "testcase_suite" and pack_run.summary is not None:
             reports.extend(pack_run.summary.get("reports", []))
 
-    combined_run = Run(target_id="live_scan", policy_hash=policy.policy_hash, fingerprint=f"live_scan:{url}")
-    clusters = _cluster_and_report(combined_run, findings, reports)
+    clusters = _cluster_and_report(combined_run, reportable_findings, reports)
 
     return {
         "mode": "live",
@@ -597,7 +610,8 @@ async def run_live_scan_pipeline(
         "auto_profile": [result.to_dict() for result in auto_profile_results],
         "pack_selection": [selection.to_dict() for selection in selections],
         "pack_runs": [pack_run.to_dict() for pack_run in pack_runs],
-        "finding_count": len(findings),
+        "finding_count": len(reportable_findings),
+        "finding_status_summary": finding_status_summary,
         "clusters": clusters,
         "reports": reports,
     }
@@ -715,8 +729,20 @@ async def run_reproduce_finding(
     if finding is None:
         raise ValueError(f"finding not found: {finding_id}")
 
-    if finding.reproduction_spec.get("type") == "scenario":
+    spec_type = finding.reproduction_spec.get("type", "single")
+    if spec_type == "scenario":
         return await _reproduce_scenario_finding(policy, store, finding, target_kind, target_config, minimize)
+    if spec_type != "single":
+        # P3.1-4: an external-tool-origin Finding (findings/external_tool.py)
+        # has no seed testcase to replay against -- report explicitly
+        # rather than crashing on the base_testcase_id lookup below.
+        return {
+            "finding_id": finding.id,
+            "testcase_id": finding.testcase_id,
+            "original_status": finding.status.value,
+            "reproduction": {"type": spec_type, "status": "unsupported"},
+            "note": f"reproduce does not support reproduction_spec.type={spec_type!r} findings yet",
+        }
 
     base_id = base_testcase_id(finding.testcase_id)
     base_case = next((case for case in testcases if case.id == base_id), None)
