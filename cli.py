@@ -19,6 +19,7 @@ from core.models import Run
 from core.orchestrator import (
     run_adaptive_pipeline,
     run_full_pipeline,
+    run_live_scan_pipeline,
     run_profile_target,
     run_reproduce_finding,
     run_sample_pipeline,
@@ -331,6 +332,32 @@ def cmd_scan(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
     testcases = load_testcases(args.testcases)
     store = SQLiteStore(args.db)
+
+    if args.url:
+        # P3.1-1: LIVE MODE entry point -- discover/classify/select-packs/run-packs
+        # against a real URL, instead of the fixture-driven --profile path below.
+        result = asyncio.run(
+            run_live_scan_pipeline(
+                policy,
+                testcases,
+                store,
+                profile,
+                args.url,
+                max_pages=args.max_pages,
+                auto_profile=args.auto_profile,
+                pack_target=args.pack_target,
+                pack_target_config=args.pack_target_config,
+                pack_budget_requests=args.pack_budget_requests,
+                external_scan_inputs={
+                    "nuclei": args.nuclei_results,
+                    "dalfox": args.dalfox_results,
+                    "trufflehog": args.trufflehog_results,
+                },
+            )
+        )
+        print(_json(result))
+        return 0
+
     recon_inputs = {
         "subfinder": args.subfinder_input,
         "httpx": args.httpx_input,
@@ -583,13 +610,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     scan = sub.add_parser(
         "scan",
-        help="Run the full orchestrator (scope -> recon -> classify -> scan -> judge -> reproduce -> dedup -> report) for a profile",
+        help="LIVE MODE: `scan <url>` discovers/classifies/selects/runs packs end-to-end (P3.1-1). "
+        "Without a url, runs the fixture-driven full orchestrator (scope -> recon -> classify -> "
+        "scan -> judge -> reproduce -> dedup -> report) for a profile.",
     )
-    scan.add_argument("--profile", choices=["quick", "llm", "agent", "rag", "web", "full"], required=True)
+    scan.add_argument(
+        "url", nargs="?", default=None,
+        help="LIVE MODE: target URL to discover/classify/pack-select/pack-run. Omit to use the "
+        "fixture-based --profile pipeline below.",
+    )
+    scan.add_argument("--profile", choices=["quick", "llm", "agent", "rag", "web", "full"], default="quick")
     scan.add_argument("--pipeline-config", type=Path, default=DEFAULT_PIPELINE_CONFIG)
     scan.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))
+    scan.add_argument("--max-pages", type=int, default=5, help="LIVE MODE only: max pages for the discovery crawl")
+    scan.add_argument(
+        "--auto-profile", action="store_true",
+        help="LIVE MODE only: verify classified llm/api candidates via the Capability Probe",
+    )
+    scan.add_argument("--pack-target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default=None)
+    scan.add_argument("--pack-target-config", type=Path, default=None)
+    scan.add_argument("--pack-budget-requests", type=int, default=None)
+    scan.add_argument("--nuclei-results", type=Path, default=None, help="LIVE MODE only: see `discover --nuclei-results`")
+    scan.add_argument("--dalfox-results", type=Path, default=None, help="LIVE MODE only: see `discover --dalfox-results`")
+    scan.add_argument("--trufflehog-results", type=Path, default=None, help="LIVE MODE only: see `discover --trufflehog-results`")
     scan.add_argument("--subfinder-input", type=Path, default=DEFAULT_FIXTURES / "subfinder-results.jsonl")
     scan.add_argument("--httpx-input", type=Path, default=DEFAULT_FIXTURES / "httpx-results.jsonl")
     scan.add_argument("--katana-input", type=Path, default=DEFAULT_FIXTURES / "katana-results.jsonl")
