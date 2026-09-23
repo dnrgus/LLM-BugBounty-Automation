@@ -13,6 +13,15 @@ class MatchResult:
     missed_ground_truth_ids: list[str] = field(default_factory=list)
     unmatched_item_locations: list[str] = field(default_factory=list)
     metrics: AccuracyMetrics = field(default_factory=lambda: compute_accuracy_metrics(0, 0, 0))
+    # P4.4-E (roadmap v4.4.0 Accuracy & Benchmark): the actual matched
+    # (true-positive) and unmatched (false-positive) AttackSurfaceItem
+    # objects, not just their ids/locations -- benchmarks/calibration.py
+    # needs each item's own `confidence` value, which the string-only
+    # fields above don't carry. Not included in to_dict()'s summary
+    # (which stays lightweight); calibration.py consumes these fields
+    # directly.
+    matched_items: list[AttackSurfaceItem] = field(default_factory=list)
+    false_positive_items: list[AttackSurfaceItem] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -44,18 +53,21 @@ def match_findings_to_ground_truth(
     matched_ids: list[str] = []
     missed_ids: list[str] = []
     matched_item_ids: set[str] = set()
+    matched_items: list[AttackSurfaceItem] = []
 
     for truth in ground_truth:
         match = next((item for item in relevant_items if item.id not in matched_item_ids and truth.matches(item)), None)
         if match is not None:
             matched_ids.append(truth.id)
             matched_item_ids.add(match.id)
+            matched_items.append(match)
         else:
             missed_ids.append(truth.id)
 
-    unmatched_locations = [item.location for item in relevant_items if item.id not in matched_item_ids]
+    false_positive_items = [item for item in relevant_items if item.id not in matched_item_ids]
+    unmatched_locations = [item.location for item in false_positive_items]
 
     metrics = compute_accuracy_metrics(
         true_positive=len(matched_ids), false_positive=len(unmatched_locations), false_negative=len(missed_ids)
     )
-    return MatchResult(matched_ids, missed_ids, unmatched_locations, metrics)
+    return MatchResult(matched_ids, missed_ids, unmatched_locations, metrics, matched_items, false_positive_items)

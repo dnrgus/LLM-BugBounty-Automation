@@ -14,6 +14,7 @@ from adapters.scanner.nuclei import NucleiAdapter
 from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
+from benchmarks.calibration import compute_confidence_calibration_across
 from benchmarks.ground_truth import load_ground_truth_corpus
 from benchmarks.matcher import match_findings_to_ground_truth
 from benchmarks.metrics import aggregate_accuracy_metrics
@@ -175,14 +176,21 @@ def cmd_quality_gate(args: argparse.Namespace) -> int:
 
     per_fixture: list[dict[str, object]] = []
     all_metrics = []
+    all_results = []
     for entry in corpus:
         _, items = collect_source_items(entry.fixture_path)
         result = match_findings_to_ground_truth(items, entry.findings)
         per_fixture.append({"fixture_path": entry.fixture_path, **result.to_dict()})
         all_metrics.append(result.metrics)
+        all_results.append(result)
 
     aggregated = aggregate_accuracy_metrics(all_metrics)
-    payload = {"fixtures": per_fixture, "aggregated": aggregated.to_dict()}
+    # P4.4-E: reported alongside the gate, never gated on itself -- a
+    # corpus this small doesn't yet give a statistically meaningful
+    # confidence signal, but the number is worth watching as the
+    # corpus grows.
+    calibration = compute_confidence_calibration_across(all_results)
+    payload = {"fixtures": per_fixture, "aggregated": aggregated.to_dict(), "confidence_calibration": calibration.to_dict()}
     print(_json(payload))
 
     if aggregated.recall < args.min_recall:
