@@ -103,3 +103,71 @@ def test_nextjs_pages_router_route_reports_method_any() -> None:
     assert route.method == "ANY"
     assert route.path == "/api/users/:id"
     assert route.framework == "nextjs_pages_router"
+
+
+def test_nestjs_controller_route_joins_class_prefix_and_method_path() -> None:
+    text = (
+        "@Controller('cats')\n"
+        "export class CatsController {\n"
+        "  @Get()\n"
+        "  findAll(): string { return ''; }\n\n"
+        "  @Get(':id')\n"
+        "  findOne(): string { return ''; }\n"
+        "}\n"
+    )
+    result = _parser.parse_file(Path("cats.controller.ts"), text)
+    routes = {(route.method, route.path, route.handler) for route in result.routes}
+    assert ("GET", "/cats", "findAll") in routes
+    assert ("GET", "/cats/:id", "findOne") in routes
+    assert all(route.framework == "nestjs" for route in result.routes)
+
+
+def test_nestjs_controller_route_with_no_prefix_and_multiple_http_methods() -> None:
+    text = (
+        "@Controller()\n"
+        "export class RootController {\n"
+        "  @Post()\n"
+        "  create(): void {}\n\n"
+        "  @Delete(':id')\n"
+        "  remove(): void {}\n"
+        "}\n"
+    )
+    result = _parser.parse_file(Path("root.controller.ts"), text)
+    routes = {(route.method, route.path, route.handler) for route in result.routes}
+    assert ("POST", "/", "create") in routes
+    assert ("DELETE", "/:id", "remove") in routes
+
+
+def test_nestjs_extra_decorator_between_controller_and_http_method_is_ignored() -> None:
+    text = (
+        "@Controller('cats')\n"
+        "export class CatsController {\n"
+        "  @UseGuards(AuthGuard)\n"
+        "  @Get()\n"
+        "  findAll(): string { return ''; }\n"
+        "}\n"
+    )
+    result = _parser.parse_file(Path("cats.controller.ts"), text)
+    assert len(result.routes) == 1
+    assert result.routes[0].method == "GET"
+    assert result.routes[0].path == "/cats"
+
+
+def test_class_without_controller_decorator_produces_no_nestjs_routes() -> None:
+    text = "export class PlainService {\n  @Get()\n  doThing() {}\n}\n"
+    result = _parser.parse_file(Path("plain.service.ts"), text)
+    assert result.routes == []
+
+
+def test_method_without_http_decorator_inside_controller_is_not_a_route() -> None:
+    text = (
+        "@Controller('cats')\n"
+        "export class CatsController {\n"
+        "  private helper(): void {}\n\n"
+        "  @Get()\n"
+        "  findAll(): string { return ''; }\n"
+        "}\n"
+    )
+    result = _parser.parse_file(Path("cats.controller.ts"), text)
+    assert len(result.routes) == 1
+    assert result.routes[0].handler == "findAll"
