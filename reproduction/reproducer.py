@@ -54,7 +54,7 @@ class Reproducer:
             session = f"{session_prefix}:repro:{attempt}"
             await self.target.reset_session(session)
             response = await self.target.send(testcase.render_prompt(), session=session)
-            judgement = self.judges.judge("reproduction", testcase, response.text)
+            judgement = self.judges.judge("reproduction", testcase, response.text, trace_events=response.trace_events)
             if judgement.passed:
                 successes += 1
 
@@ -84,7 +84,7 @@ class Reproducer:
         session = f"{session_prefix}:control"
         await self.target.reset_session(session)
         response = await self.target.send(control_case.render_prompt(), session=session)
-        judgement = self.judges.judge("control", control_case, response.text)
+        judgement = self.judges.judge("control", control_case, response.text, trace_events=response.trace_events)
         return not judgement.passed
 
     @staticmethod

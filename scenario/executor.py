@@ -69,7 +69,7 @@ async def run_scenario(
         response = await executor.execute(
             run=run, trace=trace, testcase=testcase, url=target_url, session_id=session_id
         )
-        judgement = judges.judge(run.id, testcase, response.text)
+        judgement = judges.judge(run.id, testcase, response.text, trace_events=response.trace_events)
         store.insert_judgement(judgement)
         step_responses[step.id] = response.text
         results.append(

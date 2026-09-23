@@ -337,7 +337,7 @@ async def _process_case(
             metadata=response.metadata,
         )
     )
-    judgement = judges.judge(run.id, case, response.text)
+    judgement = judges.judge(run.id, case, response.text, trace_events=response.trace_events)
     store.insert_judgement(judgement)
     if budget is not None:
         usage = response.metadata.get("usage") if isinstance(response.metadata, dict) else None

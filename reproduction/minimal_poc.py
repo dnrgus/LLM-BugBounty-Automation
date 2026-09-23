@@ -69,7 +69,7 @@ async def minimize_poc(
             session = f"{session_prefix}:minimize:{attempts}"
             await target.reset_session(session)
             response = await target.send(candidate, session=session)
-            judgement = judges.judge("minimize", testcase, response.text)
+            judgement = judges.judge("minimize", testcase, response.text, trace_events=response.trace_events)
             if judgement.passed:
                 removed_segments.append(part)
                 changed = True
