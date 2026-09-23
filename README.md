@@ -89,6 +89,15 @@
 - Finding/Reproducer/Report 연결 (4.1-E, `validation/finding_adapter.py`): `Finding`에 `origin`/`static_candidate_id`/`validation_task_ids`/`validation_status` 4개 필드 추가(전부 optional, 기존 호출부 영향 없음). Endpoint Validator는 "executable" 분류에서 자동 실행되고(CONFIRMED = 도달 가능 확인, 취약점 단정 아님), Auth/Dataflow Validator는 호출자가 실제 컨텍스트(인증 컨텍스트 쌍/주입 위치)를 명시적으로 제공할 때만 실행(planner가 이 둘을 항상 `review_only`로 유지하는 설계와 일치). `findings/dedup.py`는 이런 validation-origin finding을 `validator_type + candidate + target entity`로 dedup(재검증마다 바뀌는 랜덤 task id 대신 결정론적 키). Report는 static_candidate가 있는 finding에만 정적 근거/동적 검증/제한사항 섹션을 추가
 - Release Hardening (4.1-F): 기존 438개 회귀 스위트 + 새 74개 테스트 전부 pass(총 512), llm/rag/agent 동작은 전혀 변경 없이 그대로, 모든 신규 validator가 Policy 게이트를 먼저 통과. **알려진 범위**: endpoint validator는 `scan <url> --source <path>` HYBRID CLI에 아직 자동 연결되지 않음(라이브러리 레벨 dispatch는 완성/테스트됨) — CLI 자동 실행 확장은 회귀 위험을 이 하드닝 단계에서 새로 만들지 않기 위해 의도적으로 다음 단계로 미룸
 
+**v4.2.0 Source Intelligence Expansion** (완료, `v4.2.0` 태그 — v4.0.0까지 "Dataflow/Auth/AI source intelligence는 Python 전용"이었던 제한을 JS/TS까지 확장):
+
+- SourceFact/LanguageSourceAnalyzer Contract (4.2-A, `source/contract.py`): `trace_dataflow`/`find_auth_guards`를 언어별로 등록하는 레지스트리 — 기존에 `source/analyzers.py`가 "python이면 X, 아니면 무시"로 하드코딩했던 것을 대체. Python 백엔드는 이 레지스트리를 통해 그대로 등록(동작 변화 없음), 새 언어는 등록만 하면 바로 연결됨
+- JS/TS AST Adapter (4.2-B, `source/parsers/jsts_ast.py`): 기존 `source/parsers/javascript.py`에 인라인돼 있던 tree-sitter 언어 로딩/파싱 로직을 `parse_tree()` 공용 헬퍼로 추출 — NestJS 라우트 추출과 JS/TS dataflow/auth 백엔드가 같은 파싱 단계를 재사용
+- NestJS Framework Analyzer (4.2-C, `source/frameworks/nestjs.py`): `@Controller('prefix')` 클래스 데코레이터 + `@Get()/@Post()/...` 메소드 데코레이터로 라우트 추출. NestJS 데코레이터는 대상의 AST 자식이 아니라 형제 노드라서(`export` 키워드가 그 사이에 끼어있음) `.named_children`으로 걸러야 하는 함정을 발견/수정
+- JS/TS Dataflow + Auth (4.2-D, `source/dataflow/javascript.py`, `source/auth/javascript.py`): Express/NestJS의 `req.query/body/params/cookies/headers`에서 실제 위험 호출(`child_process.exec`, `eval`, `fs.readFileSync` 등)까지 도달하는지 함수 단위로 추적(v1은 1-hop interprocedural 없이 함수 경계를 넘지 않음, Python 버전보다 좁은 범위로 의도적으로 제한). NestJS `@UseGuards(...)`는 이름 기반 추측이 아니라 실제 프레임워크 매커니즘이라 Python 휴리스틱보다 약간 더 높은 confidence(0.7)로 보고
+- AI/RAG/Agent SDK Detection for JS/TS (4.2-E, `source/ai/python.py`): RAG/Agent 패턴은 이미 언어에 무관한 대소문자 무시 substring 매치라 추가 변경 없이 JS/TS도 인식됐음을 확인. LLM SDK 패턴만 Python의 `import X`/`from X import` 문법에 편향돼 있어서 JS `require('openai')`/ESM `import ... from '@anthropic-ai/sdk'` 인식을 추가
+- Release Hardening (4.2-F): 기존 512개 회귀 스위트 + 새 43개 테스트 전부 pass(총 555), Python 경로는 레지스트리 리팩터링 전후로 동작 완전히 동일함을 통합 테스트로 확인. **알려진 범위**: JS/TS dataflow tracer는 Python 버전과 달리 1-hop interprocedural이 없음(같은 파일의 다른 함수로 전달된 tainted 값은 추적 안 됨) — 의도적으로 좁힌 v1 범위, 필요해지면 이후 확장
+
 ## 빠른 시작
 
 ```bash
@@ -404,6 +413,36 @@ v4.0.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - **Auth/Dataflow validator는 호출자가 컨텍스트를 직접 준비해야 함**: `AuthContext` 쌍(실제 fixture/env/browser-session 자격증명)이나 `DataflowInjectionPoint`(주입 위치)를 자동으로 추론/생성하지 않음 — 이 프로젝트가 자격증명을 추측하거나 탈취하지 않는다는 안전 원칙에 따른 의도적 설계
 - v4.0.0 절에 있던 "동적 검증 실행기는 llm/rag/agent만 존재" 항목은 이번 버전으로 endpoint까지는 실행기가 생겼지만, auth/dataflow는 여전히 컨텍스트 없이는 자동 실행되지 않으므로 완전히 해소된 것은 아님(위 두 항목 참고)
 
+## v4.2.0 Release Gate
+
+구현계획서 기준 "Source Intelligence Expansion" 게이트입니다. v4.0.0까지 Python 전용이었던 dataflow tracing/auth guard 탐지를 JS/TS까지 확장하고, NestJS 라우트 추출과 JS/TS AI SDK 탐지를 추가하는 것이 v4.2.0의 완성 기준입니다.
+
+```bash
+pytest   # 555 passed
+ruff check .
+python main.py doctor
+python main.py judge-benchmark
+python main.py audit tests/fixtures/source/sample_app   # 여전히 동작 (regression)
+```
+
+### v4.2.0 완료 범위
+
+- **SourceFact Contract**: `LanguageSourceAnalyzer` 레지스트리, python 백엔드가 이를 통해 등록(동작 변화 없음) (4.2-A)
+- **JS/TS AST Adapter**: 공용 `parse_tree()` 헬퍼로 tree-sitter 파싱 로직 중복 제거 (4.2-B)
+- **NestJS Framework Analyzer**: `@Controller`/`@Get()` 등 데코레이터 기반 라우트 추출 (4.2-C)
+- **JS/TS Dataflow + Auth**: Express/NestJS `req.*` → 위험 호출 추적(1-hop interprocedural 없음), `@UseGuards(...)` 탐지 (4.2-D)
+- **AI/RAG/Agent SDK Detection for JS/TS**: `require`/ESM import 문법 인식 추가 (4.2-E)
+- **Regression**: 기존 512개 baseline을 포함한 전체 테스트 스위트가 100% pass (v4.1.0의 512 → 현재 555, 신규 43개)
+- **CI**: 기존 `.github/workflows/ci.yml`이 변경 없이 그대로 통과
+
+### v4.2.0 알려진 제한사항 (Known Limitations)
+
+v4.1.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 생긴/여전히 남은 항목만 추가합니다.
+
+- **JS/TS dataflow tracer는 1-hop interprocedural이 없음**: `source/dataflow/javascript.py`는 함수 경계를 넘어 전파되는 taint를 추적하지 않음(같은 파일의 다른 함수로 전달된 tainted 값은 놓침) — Python 버전(`source/dataflow/python.py`)은 이 기능이 있음. 의도적으로 좁힌 v1 범위이며, 필요해지면 이후 확장 대상
+- **Flask/FastAPI 이외 Python 프레임워크나 Django/Spring/Rails/Gin 등은 여전히 route/dataflow/auth AST 지원이 없음**: `source/ingestion.py`의 `_FRAMEWORK_SIGNATURES`는 이들을 감지만 하고(매니페스트 파일 기반), 실제 route/dataflow 추출은 Python(Flask/FastAPI)과 JS/TS(Express/Next.js/NestJS)로 한정됨
+- v4.1.0 절에 있던 항목들 계속 유효 (endpoint validator가 HYBRID CLI에 자동 연결되지 않음, auth/dataflow validator가 호출자 컨텍스트 필요)
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -419,6 +458,7 @@ v4.0.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - `v3.4.0`: Production Hardening (checkpoint/resume, cancellation, evidence integrity, large-target 성능)
 - `v4.0.0`: 실전 완성판 — 로드맵이 권장하는 최종 목표 (URL/Source/Both 세 입력 모두 end-to-end)
 - `v4.1.0`: Dynamic Validation Expansion (validation contract, endpoint/auth/dataflow validator, Finding/Reproducer/Report 통합)
+- `v4.2.0`: Source Intelligence Expansion (LanguageSourceAnalyzer contract, NestJS 라우트, JS/TS dataflow/auth/AI SDK 탐지)
 
 ## 개발 흐름
 
