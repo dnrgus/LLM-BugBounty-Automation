@@ -20,6 +20,21 @@ _LLM_SDK_PATTERNS = [
     re.compile(r"ChatCompletion\.create"),
     re.compile(r"client\.messages\.create"),
     re.compile(r"chat\.completions\.create"),
+    # P4.2-E (roadmap v4.2.0 Source Intelligence Expansion): JS/TS's
+    # require()/ESM import syntax and SDK class instantiation -- this
+    # whole function already runs unconditionally on every file
+    # regardless of language (source/analyzers.py's _find_llm_integration
+    # never gated it), but the patterns above only recognized Python's
+    # `import X`/`from X import` form, so a JS/TS file's `require('openai')`
+    # or `import OpenAI from 'openai'` went undetected until now.
+    re.compile(r"require\(\s*[\"']openai[\"']\s*\)"),
+    re.compile(r"from\s+[\"']openai[\"']"),
+    re.compile(r"require\(\s*[\"']@anthropic-ai/sdk[\"']\s*\)"),
+    re.compile(r"from\s+[\"']@anthropic-ai/sdk[\"']"),
+    re.compile(r"require\(\s*[\"']@google/generative-ai[\"']\s*\)"),
+    re.compile(r"from\s+[\"']@google/generative-ai[\"']"),
+    re.compile(r"\bnew\s+OpenAI\s*\("),
+    re.compile(r"\bnew\s+Anthropic\s*\("),
 ]
 
 _RAG_PATTERNS = [

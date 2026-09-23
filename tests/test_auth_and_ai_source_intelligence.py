@@ -66,3 +66,32 @@ def test_rag_and_agent_signals_are_each_reported_separately() -> None:
 def test_plain_file_with_no_ai_signals_produces_no_hints() -> None:
     text = "def add(a, b):\n    return a + b\n"
     assert find_ai_capability_hints("app.py", text) == []
+
+
+def test_js_require_openai_produces_an_llm_capability_hint() -> None:
+    text = "const OpenAI = require('openai');\nconst client = new OpenAI();\n"
+    hints = find_ai_capability_hints("app.js", text)
+    kinds = {hint.kind for hint in hints}
+    assert kinds == {"llm"}
+
+
+def test_ts_esm_import_anthropic_sdk_produces_an_llm_capability_hint() -> None:
+    text = "import Anthropic from '@anthropic-ai/sdk';\nconst client = new Anthropic();\n"
+    hints = find_ai_capability_hints("app.ts", text)
+    kinds = {hint.kind for hint in hints}
+    assert kinds == {"llm"}
+
+
+def test_js_langchain_import_produces_a_rag_capability_hint() -> None:
+    text = "import { OpenAIEmbeddings } from '@langchain/openai';\n"
+    hints = find_ai_capability_hints("app.ts", text)
+    kinds = {hint.kind for hint in hints}
+    assert "rag" in kinds
+
+
+def test_js_tool_calls_field_produces_an_agent_capability_hint() -> None:
+    text = "const response = await client.chat.completions.create({ tools: [], tool_calls: [] });\n"
+    hints = find_ai_capability_hints("app.js", text)
+    kinds = {hint.kind for hint in hints}
+    assert "agent" in kinds
+    assert "llm" in kinds
