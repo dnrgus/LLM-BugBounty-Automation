@@ -14,6 +14,9 @@ from adapters.scanner.nuclei import NucleiAdapter
 from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
+from benchmarks.ground_truth import load_ground_truth_corpus
+from benchmarks.matcher import match_findings_to_ground_truth
+from benchmarks.metrics import aggregate_accuracy_metrics
 from core.budget import AttackBudget
 from core.cancel import CancellationToken
 from core.fingerprint import build_environment_fingerprint
@@ -44,7 +47,7 @@ from recon.pipeline import build_asset_map
 from scenario.executor import run_scenario
 from scenario.finding import promote_scenario_result
 from scenario.loader import load_scenarios
-from source.audit import audit_source
+from source.audit import audit_source, collect_source_items
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
@@ -57,6 +60,7 @@ DEFAULT_SCOPE = Path("config/scope.example.yaml")
 DEFAULT_TESTCASES = Path("testcase/suites/basic.yaml")
 DEFAULT_SCENARIOS = Path("scenario/suites/basic.yaml")
 DEFAULT_JUDGE_BENCHMARK = Path("benchmarks/judge/baseline.json")
+DEFAULT_GROUND_TRUTH_CORPUS = Path("benchmarks/corpus")
 DEFAULT_TOOLS = Path("config/tools.yaml")
 DEFAULT_PIPELINE_CONFIG = Path("config/pipeline.yaml")
 DEFAULT_FIXTURES = Path("tests/fixtures/tools")
@@ -154,6 +158,38 @@ def cmd_judge_benchmark(args: argparse.Namespace) -> int:
     print(_json(result))
     metrics = result["metrics"]
     return 0 if metrics["false_positive"] == 0 and metrics["false_negative"] == 0 else 1
+
+
+def cmd_quality_gate(args: argparse.Namespace) -> int:
+    """P4.4-D (roadmap v4.4.0 Accuracy & Benchmark): runs SOURCE MODE
+    against every fixture in the ground-truth corpus, scores the
+    result (P4.4-C), and fails (non-zero exit) if the aggregated
+    precision/recall drop below the given thresholds -- mirrors
+    cmd_judge_benchmark's own "print the report, then gate on it"
+    shape.
+    """
+    corpus = load_ground_truth_corpus(args.corpus)
+    if not corpus:
+        print(_json({"error": f"no *.ground_truth.yaml files found under {args.corpus}"}))
+        return 1
+
+    per_fixture: list[dict[str, object]] = []
+    all_metrics = []
+    for entry in corpus:
+        _, items = collect_source_items(entry.fixture_path)
+        result = match_findings_to_ground_truth(items, entry.findings)
+        per_fixture.append({"fixture_path": entry.fixture_path, **result.to_dict()})
+        all_metrics.append(result.metrics)
+
+    aggregated = aggregate_accuracy_metrics(all_metrics)
+    payload = {"fixtures": per_fixture, "aggregated": aggregated.to_dict()}
+    print(_json(payload))
+
+    if aggregated.recall < args.min_recall:
+        return 1
+    if aggregated.precision < args.min_precision:
+        return 1
+    return 0
 
 
 def cmd_normalize_tool_output(args: argparse.Namespace) -> int:
@@ -550,6 +586,12 @@ def build_parser() -> argparse.ArgumentParser:
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
     judge_benchmark.add_argument("--benchmark", type=Path, default=DEFAULT_JUDGE_BENCHMARK)
     judge_benchmark.set_defaults(func=cmd_judge_benchmark)
+
+    quality_gate = sub.add_parser("quality-gate", help="Score SOURCE MODE against the ground-truth corpus")
+    quality_gate.add_argument("--corpus", type=Path, default=DEFAULT_GROUND_TRUTH_CORPUS)
+    quality_gate.add_argument("--min-recall", type=float, default=0.85)
+    quality_gate.add_argument("--min-precision", type=float, default=0.85)
+    quality_gate.set_defaults(func=cmd_quality_gate)
 
     normalize = sub.add_parser("normalize-tool-output", help="Normalize external LLM tool output")
     normalize.add_argument(
