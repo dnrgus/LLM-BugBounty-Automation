@@ -56,8 +56,6 @@ def test_error_frame_raises_target_parse_error() -> None:
 
 
 def test_final_frame_stops_the_stream_early() -> None:
-    seen_after_final = []
-
     def handler(request: httpx.Request) -> httpx.Response:
         body = _sse_body([{"type": "final", "content": "done"}, {"type": "token", "content": "should not appear"}])
         return httpx.Response(200, text=body)
