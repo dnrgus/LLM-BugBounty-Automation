@@ -5,8 +5,16 @@ import re
 from attack_surface.models import AttackSurfaceItem
 from source.ai.python import find_ai_capability_hints
 from source.auth.python import find_auth_guards
+from source.contract import LanguageSourceAnalyzer, get_language_analyzer, register_language_analyzer
 from source.dataflow.python import trace_dataflow
 from source.ingestion import SourceFile
+
+# P4.2-A: python's dataflow/auth backends, registered through the same
+# contract a future language's backend (P4.2-D) plugs into -- behavior
+# for python files is unchanged, just reached via a lookup now.
+register_language_analyzer(
+    LanguageSourceAnalyzer(language="python", trace_dataflow=trace_dataflow, find_auth_guards=find_auth_guards)
+)
 
 _INPUT_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "python": [
@@ -125,17 +133,20 @@ def _find_secrets(source_file: SourceFile, text: str) -> list[AttackSurfaceItem]
 
 
 def _find_dataflow_edges(source_file: SourceFile, text: str) -> list[AttackSurfaceItem]:
-    """P3.2-3 (roadmap v3.2.0 Source Intelligence): Python-only for now
-    (source/dataflow/python.py). A distinct, higher-confidence signal
-    from _find_sinks' plain "this dangerous call exists somewhere in the
-    file" regex match -- this only fires when a request-derived value is
-    actually traced reaching that call, with real source->sink evidence
-    rather than a string-shape guess.
+    """P3.2-3 (roadmap v3.2.0 Source Intelligence), extended by P4.2-D
+    to also cover javascript/typescript via source/dataflow/javascript.py,
+    both reached through the P4.2-A language-analyzer registry rather
+    than a hardcoded language check. A distinct, higher-confidence
+    signal from _find_sinks' plain "this dangerous call exists somewhere
+    in the file" regex match -- this only fires when a request-derived
+    value is actually traced reaching that call, with real source->sink
+    evidence rather than a string-shape guess.
     """
-    if source_file.language != "python":
+    analyzer = get_language_analyzer(source_file.language)
+    if analyzer is None or analyzer.trace_dataflow is None:
         return []
     items: list[AttackSurfaceItem] = []
-    for edge in trace_dataflow(source_file.path, text):
+    for edge in analyzer.trace_dataflow(source_file.path, text):
         items.append(
             AttackSurfaceItem(
                 source_type="source",
@@ -178,12 +189,16 @@ def _find_llm_integration(source_file: SourceFile, text: str) -> list[AttackSurf
 
 
 def _find_auth_guards(source_file: SourceFile, text: str, route_handlers: set[str]) -> list[AttackSurfaceItem]:
-    """P3.2-4 (roadmap v3.2.0 Source Intelligence): a route-level auth
-    posture *candidate*, never a confirmed absence -- see
-    source/auth/python.py's AuthGuardHint docstring for why.
+    """P3.2-4 (roadmap v3.2.0 Source Intelligence), extended by P4.2-D
+    to also cover javascript/typescript via source/auth/javascript.py.
+    A route-level auth posture *candidate*, never a confirmed absence --
+    see source/auth/python.py's AuthGuardHint docstring for why.
     """
+    analyzer = get_language_analyzer(source_file.language)
+    if analyzer is None or analyzer.find_auth_guards is None:
+        return []
     items: list[AttackSurfaceItem] = []
-    for hint in find_auth_guards(source_file.path, text, route_handlers):
+    for hint in analyzer.find_auth_guards(source_file.path, text, route_handlers):
         items.append(
             AttackSurfaceItem(
                 source_type="source",
