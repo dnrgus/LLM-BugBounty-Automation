@@ -19,6 +19,15 @@ _EXACT_SINKS = {
     "yaml.load": "deserialization",
     "render_template_string": "template_injection",
     "open": "file_access",
+    # P4.2-D (roadmap v4.2.0 Source Intelligence Expansion): JS/TS
+    # equivalents, keyed the same way (dotted callee name as written).
+    "Function": "code_execution",
+    "child_process.exec": "os_command",
+    "child_process.execSync": "os_command",
+    "child_process.spawn": "os_command",
+    "fs.readFileSync": "file_access",
+    "fs.readFile": "file_access",
+    "res.render": "template_injection",
 }
 
 _SQL_METHOD_NAMES = {"execute", "query"}
@@ -26,6 +35,7 @@ _SQL_METHOD_NAMES = {"execute", "query"}
 _HTTP_CALL_SUFFIXES = (
     "requests.get", "requests.post", "requests.put", "requests.delete", "requests.patch",
     "httpx.get", "httpx.post", "httpx.put", "httpx.delete", "httpx.patch",
+    "axios.get", "axios.post", "axios.put", "axios.delete", "axios.patch",
 )
 
 _LLM_CALL_SUFFIXES = (
