@@ -11,10 +11,9 @@ from source.frameworks.nextjs import (
     pages_api_route_path,
 )
 from source.models import CallNode, ParserResult, RouteNode
+from source.parsers.jsts_ast import TreeSitterUnavailable, parse_tree
 
 _NEXT_HTTP_EXPORT_NAMES = {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
-
-_language_cache: dict[str, Any] = {}
 
 
 class JavaScriptTypeScriptParser:
@@ -35,48 +34,15 @@ class JavaScriptTypeScriptParser:
 
     def parse_file(self, path: Path, text: str) -> ParserResult:
         try:
-            ts_language = _language_for(path.suffix.lower())
-        except RuntimeError as exc:
+            tree, source_bytes = parse_tree(path, text)
+        except TreeSitterUnavailable as exc:
             return ParserResult(language=self.language, errors=[str(exc)])
-
-        from tree_sitter import Parser
-
-        source_bytes = text.encode("utf-8", errors="ignore")
-        try:
-            tree = Parser(ts_language).parse(source_bytes)
-        except Exception as exc:  # noqa: BLE001 -- never let a parser crash take down the whole audit
-            return ParserResult(language=self.language, errors=[f"{path}: {exc}"])
 
         routes: list[RouteNode] = []
         calls: list[CallNode] = []
         _walk(tree.root_node, source_bytes, path, routes, calls, enclosing=None)
         routes.extend(_nextjs_routes(path, tree.root_node, source_bytes))
         return ParserResult(language=self.language, routes=routes, calls=calls)
-
-
-def _language_for(suffix: str) -> Any:
-    try:
-        from tree_sitter import Language
-    except ImportError as exc:
-        raise RuntimeError("tree-sitter is not installed (pip install '.[jsts]')") from exc
-
-    if suffix in _language_cache:
-        return _language_cache[suffix]
-
-    if suffix == ".ts":
-        import tree_sitter_typescript as tsts
-
-        language = Language(tsts.language_typescript())
-    elif suffix == ".tsx":
-        import tree_sitter_typescript as tsts
-
-        language = Language(tsts.language_tsx())
-    else:  # .js / .jsx
-        import tree_sitter_javascript as tsjs
-
-        language = Language(tsjs.language())
-    _language_cache[suffix] = language
-    return language
 
 
 def _text(source: bytes, node: Any) -> str:
