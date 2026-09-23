@@ -1,0 +1,35 @@
+# P4.3-B generic HTTP SSE/streaming transport -- for a target that
+# streams tokens over Server-Sent-Events (or plain chunked JSON lines)
+# rather than a plain HTTP request/response, or a WebSocket.
+#
+# frame.type_field / frame.text_field / frame.{final,error}_types make
+# the frame JSON shape configurable, since streaming APIs disagree on
+# it. The default shape is {"type": "token", "content": "..."} for each
+# token and {"type": "final"} / {"type": "done"} to end the stream.
+#
+# Usage:
+#   export TARGET_API_KEY=...
+#   python main.py sample-run --target openai --target-config config/targets/sse.example.yaml \
+#     --scope config/my-scope.yaml
+
+target:
+  id: example-sse-target
+  adapter: sse
+  base_url: https://lab.example.com/stream
+  auth:
+    api_key_env: TARGET_API_KEY
+    header_name: Authorization
+    header_prefix: "Bearer "
+  request:
+    method: POST
+    body_template:
+      message: "{{PROMPT}}"
+      session_id: "{{SESSION}}"
+  frame:
+    type_field: type
+    text_field: content
+    final_types: [final, done, end]
+    error_types: [error]
+  timeout_seconds: 30
+  capabilities:
+    chat: true

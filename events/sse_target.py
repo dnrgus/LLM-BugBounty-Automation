@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator
+
+import httpx
 
 from core.models import CapabilityProfile, TraceEvent
 from events.models import Event, EventType
@@ -11,54 +13,54 @@ from targets.errors import TargetConnectionError, TargetParseError
 
 
 @dataclass(frozen=True)
-class WebSocketTargetConfig:
-    """type_field/text_field/*_types make the frame shape configurable,
-    since different WS-based LLM/agent APIs disagree on it -- the same
-    "don't assume one vendor's exact JSON shape" reasoning
-    CustomJSONInteraction already applies to plain HTTP targets.
+class SSETargetConfig:
+    """P4.3-B (roadmap v4.3.0 Runtime Coverage Expansion): the HTTP
+    Server-Sent-Events / chunked-streaming counterpart to
+    events/websocket_target.py's generic WS transport. Frame shape is
+    configurable the same way (type_field/text_field/*_types), since
+    different SSE-based LLM/agent APIs disagree on it.
     """
 
     id: str
     name: str
     version: str
     url: str
+    method: str = "POST"
+    headers: dict[str, str] = field(default_factory=dict)
+    request_body_template: dict[str, Any] = field(default_factory=lambda: {"message": "{{PROMPT}}"})
     type_field: str = "type"
     text_field: str = "content"
-    token_types: tuple[str, ...] = ("token", "delta")
     final_types: tuple[str, ...] = ("final", "done", "end")
     error_types: tuple[str, ...] = ("error",)
     capabilities: dict[str, bool] = field(default_factory=lambda: {"chat": True})
     timeout_seconds: float = 30.0
-    extra_headers: dict[str, str] = field(default_factory=dict)
-    connector: Callable[..., Any] | None = None  # injectable websockets.connect-alike, for tests
+    transport: httpx.AsyncBaseTransport | None = None  # injectable for tests, mirrors validation/*_validator.py's own pattern
 
 
-class WebSocketTargetAdapter:
-    """U11 generic WebSocket transport (design doc section 13): connects
-    to an arbitrary WS-based streaming target, sends one JSON prompt
-    frame, and interprets the resulting frame stream as a formal Event
-    sequence (START/TOKEN/RETRIEVAL/TOOL_CALL/FINAL/ERROR) instead of
-    assuming any one vendor's exact shape.
+class SSETargetAdapter:
+    """Connects to an arbitrary SSE (`text/event-stream`) or chunked
+    HTTP streaming target, sends one JSON prompt body, and interprets
+    the resulting `data: {...}` frame stream as the same formal Event
+    sequence (START/TOKEN/RETRIEVAL/TOOL_CALL/FINAL/ERROR)
+    events/websocket_target.py already uses.
 
-    Implements the same TargetAdapter protocol every other adapter in
-    this project does, so it slots into the existing Executor/pipeline
-    completely unchanged -- send() still returns one TargetResponse; the
-    Event stream for that call becomes its trace_events. P4.3-C
-    (roadmap v4.3.0 Runtime Coverage Expansion) additionally implements
-    the StreamingTargetAdapter protocol's events() -- send() is itself
-    now built on top of events(), the same shared-source-of-truth shape
-    events/sse_target.py's SSETargetAdapter already uses, so there is
-    exactly one place that actually interprets a frame.
+    Implements both the existing TargetAdapter protocol (`send()`
+    returns one aggregated TargetResponse, so this slots into the
+    existing Executor/pipeline completely unchanged) and the new
+    StreamingTargetAdapter protocol's `events()` (P4.3-A) -- `send()`
+    is itself built on top of `events()`, so there is exactly one place
+    that actually interprets a frame.
     """
 
-    def __init__(self, config: WebSocketTargetConfig):
+    def __init__(self, config: SSETargetConfig):
         self.config = config
         self._trace: dict[str, list[TraceEvent]] = {}
 
     async def healthcheck(self) -> bool:
         try:
-            async with self._connect():
-                return True
+            async with httpx.AsyncClient(timeout=self.config.timeout_seconds, transport=self.config.transport) as client:
+                response = await client.request(self.config.method, self.config.url, json={"health_check": True})
+                return response.status_code < 500
         except Exception:
             return False
 
@@ -66,7 +68,7 @@ class WebSocketTargetAdapter:
         return TargetMetadata(
             id=self.config.id,
             kind="llm",
-            provider="websocket-generic",
+            provider="sse-generic",
             name=self.config.name,
             version=self.config.version,
             base_url=self.config.url,
@@ -77,18 +79,22 @@ class WebSocketTargetAdapter:
 
     async def events(self, prompt: str, session: str | None = None) -> AsyncIterator[Event]:
         session_id = session or "default"
+        body = _render_body(self.config.request_body_template, prompt, session_id)
         sequence = 0
         try:
-            async with self._connect() as websocket:
-                await websocket.send(json.dumps({"prompt": prompt, "session": session_id}))
-                async for raw in websocket:
-                    frame = json.loads(raw)
-                    sequence += 1
-                    yield self._interpret(frame, sequence)
+            async with httpx.AsyncClient(timeout=self.config.timeout_seconds, transport=self.config.transport) as client:
+                async with client.stream(self.config.method, self.config.url, json=body, headers=self.config.headers) as response:
+                    async for line in response.aiter_lines():
+                        raw = _strip_sse_prefix(line)
+                        if raw is None:
+                            continue
+                        sequence += 1
+                        frame = _parse_frame(raw)
+                        yield self._interpret(frame, sequence)
         except (TargetConnectionError, TargetParseError):
             raise
         except Exception as exc:
-            raise TargetConnectionError(f"websocket connection to {self.config.url} failed: {exc}") from exc
+            raise TargetConnectionError(f"sse connection to {self.config.url} failed: {exc}") from exc
 
     async def send(self, prompt: str, session: str | None = None) -> TargetResponse:
         session_id = session or "default"
@@ -107,7 +113,7 @@ class WebSocketTargetAdapter:
                 if chunk:
                     text_parts.append(chunk)
             elif event.type == EventType.ERROR:
-                error_message = _extract_text(event.data, self.config.text_field) or "websocket target reported an error"
+                error_message = _extract_text(event.data, self.config.text_field) or "sse target reported an error"
                 break
             elif event.type == EventType.FINAL:
                 final_text = _extract_text(event.data, self.config.text_field)
@@ -119,9 +125,7 @@ class WebSocketTargetAdapter:
             raise TargetParseError(error_message)
 
         text = "".join(text_parts)
-        return TargetResponse(
-            prompt=prompt, text=text, metadata={"session": session_id}, trace_events=call_trace_events
-        )
+        return TargetResponse(prompt=prompt, text=text, metadata={"session": session_id}, trace_events=call_trace_events)
 
     async def reset_session(self, session: str | None = None) -> None:
         self._trace.pop(session or "default", None)
@@ -147,14 +151,43 @@ class WebSocketTargetAdapter:
             kind = EventType.TOKEN
         return Event(type=kind, sequence=sequence, data=frame)
 
-    def _connect(self) -> Any:
-        import websockets
 
-        connector = self.config.connector or websockets.connect
-        kwargs: dict[str, Any] = {"open_timeout": self.config.timeout_seconds}
-        if self.config.extra_headers:
-            kwargs["additional_headers"] = self.config.extra_headers
-        return connector(self.config.url, **kwargs)
+def _render_body(template: dict[str, Any], prompt: str, session_id: str) -> dict[str, Any]:
+    def _render(value: Any) -> Any:
+        if isinstance(value, str):
+            return value.replace("{{PROMPT}}", prompt).replace("{{SESSION}}", session_id)
+        if isinstance(value, dict):
+            return {k: _render(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_render(v) for v in value]
+        return value
+
+    return _render(template)
+
+
+def _strip_sse_prefix(line: str) -> str | None:
+    """A `text/event-stream` body's meaningful lines are `data: <payload>`
+    (blank lines separate events, `event:`/`id:`/`retry:` fields are
+    ignored -- this project only needs the payload); a plain
+    chunked-JSON-lines stream (no `data:` prefix at all) is also
+    accepted so this adapter isn't strictly limited to spec-perfect SSE.
+    """
+    if not line:
+        return None
+    if line.startswith("data:"):
+        payload = line[len("data:") :].strip()
+        return payload or None
+    if line.startswith((":", "event:", "id:", "retry:")):
+        return None
+    return line.strip() or None
+
+
+def _parse_frame(raw: str) -> dict[str, Any]:
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return {"content": raw}
+    return parsed if isinstance(parsed, dict) else {"content": raw}
 
 
 def _extract_text(frame: dict[str, Any], text_field: str) -> str:
