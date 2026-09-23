@@ -156,3 +156,21 @@ def test_event_to_dict_is_json_serializable() -> None:
     payload = event.to_dict()
     json.dumps(payload)
     assert payload == {"type": "token", "sequence": 1, "data": {"content": "hi"}}
+
+
+def test_events_yields_raw_events_that_send_aggregates() -> None:
+    connector = _FakeConnector(frames=[{"type": "token", "content": "a"}, {"type": "final", "content": "b"}])
+    adapter = WebSocketTargetAdapter(_config(connector))
+
+    async def _collect():
+        return [event async for event in adapter.events("hi")]
+
+    events = asyncio.run(_collect())
+    assert [event.type for event in events] == [EventType.TOKEN, EventType.FINAL]
+
+
+def test_websocket_adapter_supports_streaming() -> None:
+    from targets.base import supports_streaming
+
+    adapter = WebSocketTargetAdapter(_config(_FakeConnector()))
+    assert supports_streaming(adapter) is True

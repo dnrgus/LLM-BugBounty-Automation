@@ -6,13 +6,14 @@ from typing import Any
 
 import yaml
 
+from events.sse_target import SSETargetAdapter, SSETargetConfig
 from events.websocket_target import WebSocketTargetAdapter, WebSocketTargetConfig
 from manifest.loader import build_manifest_target
 from plugins import get_plugin
 from targets.base import TargetAdapter
 from targets.http_target import CustomHTTPAdapter, CustomHTTPConfig, HTTPTargetConfig, OpenAICompatibleTarget
 
-_SUPPORTED_ADAPTERS = {"openai_compatible", "custom_http", "universal", "websocket"}
+_SUPPORTED_ADAPTERS = {"openai_compatible", "custom_http", "universal", "websocket", "sse"}
 
 
 def _resolve_auth_header(auth: dict[str, Any]) -> dict[str, str]:
@@ -92,6 +93,30 @@ def load_target(path: Path | str) -> TargetAdapter:
                 capabilities=capabilities,
                 timeout_seconds=timeout_seconds,
                 extra_headers={k: v for k, v in headers.items() if k != "Content-Type"},
+            )
+        )
+
+    if adapter_kind == "sse":
+        # P4.3-B (roadmap v4.3.0 Runtime Coverage Expansion): base_url
+        # is the http(s):// streaming endpoint itself; auth/headers use
+        # the same scheme as custom_http/openai_compatible (built above).
+        frame = target.get("frame") or {}
+        request = target.get("request") or {}
+        return SSETargetAdapter(
+            SSETargetConfig(
+                id=target_id,
+                name=target_id,
+                version=str(target.get("version", "unknown")),
+                url=base_url,
+                method=str(request.get("method", "POST")),
+                headers=headers,
+                request_body_template=request.get("body_template") or {"message": "{{PROMPT}}"},
+                type_field=str(frame.get("type_field", "type")),
+                text_field=str(frame.get("text_field", "content")),
+                final_types=tuple(frame.get("final_types", ["final", "done", "end"])),
+                error_types=tuple(frame.get("error_types", ["error"])),
+                capabilities=capabilities,
+                timeout_seconds=timeout_seconds,
             )
         )
 

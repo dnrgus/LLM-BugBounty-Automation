@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from events.sse_target import SSETargetAdapter
 from events.websocket_target import WebSocketTargetAdapter
 from manifest.adapter import CompatibilityAdapter
 from plugins.browser import BrowserTargetAdapter
@@ -127,6 +128,38 @@ target:
     assert target.config.type_field == "kind"
     assert target.config.token_types == ("chunk",)
     assert target.config.extra_headers["Authorization"] == "Bearer sk-ws"
+
+
+def test_load_target_builds_sse_adapter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_TARGET_API_KEY", "sk-sse")
+    config_path = tmp_path / "sse.yaml"
+    config_path.write_text(
+        """
+target:
+  id: lab-sse
+  adapter: sse
+  base_url: https://lab.example.com/stream
+  auth:
+    api_key_env: TEST_TARGET_API_KEY
+  request:
+    method: POST
+    body_template:
+      message: "{{PROMPT}}"
+  frame:
+    type_field: kind
+    text_field: text
+    final_types: [complete]
+  capabilities:
+    chat: true
+""",
+        encoding="utf-8",
+    )
+    target = load_target(config_path)
+    assert isinstance(target, SSETargetAdapter)
+    assert target.config.url == "https://lab.example.com/stream"
+    assert target.config.type_field == "kind"
+    assert target.config.final_types == ("complete",)
+    assert target.config.headers["Authorization"] == "Bearer sk-sse"
 
 
 def test_load_target_builds_browser_adapter_via_plugin_fallback(tmp_path: Path) -> None:
