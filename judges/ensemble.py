@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core.models import Judgement
+from core.models import Judgement, TraceEvent
 from judges.signals import JudgeSignal, default_judges
 from testcase.schema import Testcase
 
@@ -14,8 +14,18 @@ class JudgeEnsemble:
     def default(cls) -> "JudgeEnsemble":
         return cls(["rule", "regex", "canary"])
 
-    def judge(self, run_id: str, testcase: Testcase, response_text: str) -> Judgement:
-        signals = [self._judge_one(name, response_text) for name in testcase.judges if name in self.enabled]
+    def judge(
+        self, run_id: str, testcase: Testcase, response_text: str, trace_events: list[TraceEvent] | None = None
+    ) -> Judgement:
+        """P4.3-E (roadmap v4.3.0 Runtime Coverage Expansion):
+        trace_events is optional/additive -- every existing call site
+        that doesn't pass it (or a target with no Event stream at all)
+        keeps working exactly as before. A judge that also implements
+        evaluate_events() (currently only StreamingAnomalyJudge) uses
+        it when both the judge is enabled/listed AND trace_events were
+        actually supplied; every other judge is unaffected.
+        """
+        signals = [self._judge_one(name, response_text, trace_events) for name in testcase.judges if name in self.enabled]
         if not signals:
             signals = [JudgeSignal("none", False, 0.0, "no enabled judges")]
         passed = any(signal.passed for signal in signals)
@@ -30,8 +40,10 @@ class JudgeEnsemble:
             reason=reason,
         )
 
-    def _judge_one(self, name: str, text: str) -> JudgeSignal:
+    def _judge_one(self, name: str, text: str, trace_events: list[TraceEvent] | None) -> JudgeSignal:
         judge = self.judges.get(name)
-        if judge is not None:
-            return judge.evaluate(text)
-        return JudgeSignal(name, False, 0.0, "unsupported judge")
+        if judge is None:
+            return JudgeSignal(name, False, 0.0, "unsupported judge")
+        if trace_events and hasattr(judge, "evaluate_events"):
+            return judge.evaluate_events(text, trace_events)
+        return judge.evaluate(text)
