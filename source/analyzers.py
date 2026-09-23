@@ -4,8 +4,10 @@ import re
 
 from attack_surface.models import AttackSurfaceItem
 from source.ai.python import find_ai_capability_hints
+from source.auth.javascript import find_auth_guards as find_auth_guards_js
 from source.auth.python import find_auth_guards
 from source.contract import LanguageSourceAnalyzer, get_language_analyzer, register_language_analyzer
+from source.dataflow.javascript import trace_dataflow as trace_dataflow_js
 from source.dataflow.python import trace_dataflow
 from source.ingestion import SourceFile
 
@@ -15,6 +17,17 @@ from source.ingestion import SourceFile
 register_language_analyzer(
     LanguageSourceAnalyzer(language="python", trace_dataflow=trace_dataflow, find_auth_guards=find_auth_guards)
 )
+# P4.2-D: JS/TS backends -- registered under both language keys since
+# source/ingestion.py's language detection reports "javascript" for
+# .js/.jsx and "typescript" for .ts/.tsx (source/routes.py's own
+# _AST_PARSERS dict makes the same both-keys-one-implementation choice
+# for route extraction).
+for _js_language in ("javascript", "typescript"):
+    register_language_analyzer(
+        LanguageSourceAnalyzer(
+            language=_js_language, trace_dataflow=trace_dataflow_js, find_auth_guards=find_auth_guards_js
+        )
+    )
 
 _INPUT_PATTERNS: dict[str, list[re.Pattern[str]]] = {
     "python": [

@@ -44,6 +44,29 @@ def parse_tree(path: Path, text: str) -> tuple[Any, bytes]:
     return tree, source_bytes
 
 
+def node_text(source: bytes, node: Any) -> str:
+    return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+
+def dotted_call_name(node: Any, source: bytes) -> str | None:
+    """P4.2-D: the JS/TS equivalent of source/dataflow/python.py's
+    `_dotted_name` -- resolves a call's callee expression (identifier
+    or member-expression chain) to a dotted string like "child_process.exec",
+    matching source/sinks/python.py's sink_for_call's expected shape.
+    """
+    if node.type == "identifier":
+        return node_text(source, node)
+    if node.type == "member_expression":
+        obj = node.child_by_field_name("object")
+        prop = node.child_by_field_name("property")
+        if obj is None or prop is None:
+            return None
+        base = dotted_call_name(obj, source)
+        prop_name = node_text(source, prop)
+        return f"{base}.{prop_name}" if base else prop_name
+    return None
+
+
 def _language_for(suffix: str) -> Any:
     try:
         from tree_sitter import Language
