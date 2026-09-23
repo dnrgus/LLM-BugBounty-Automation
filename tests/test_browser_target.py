@@ -7,8 +7,9 @@ from targets.errors import TargetConnectionError, TargetParseError
 
 
 class _FakePage:
-    def __init__(self, response_text: str = "hello from the page"):
+    def __init__(self, response_text: str = "hello from the page", growth: list[str] | None = None):
         self.response_text = response_text
+        self._growth = list(growth) if growth is not None else None
         self.calls: list[tuple[str, tuple]] = []
 
     async def goto(self, url: str) -> None:
@@ -28,6 +29,10 @@ class _FakePage:
 
     async def inner_text(self, selector: str) -> str:
         self.calls.append(("inner_text", (selector,)))
+        if self._growth is not None:
+            if self._growth:
+                self.response_text = self._growth.pop(0)
+            return self.response_text
         return self.response_text
 
 
@@ -145,3 +150,50 @@ def test_real_browser_session_raises_a_clear_error_without_playwright_installed(
     with pytest.raises((RuntimeError, TargetConnectionError)) as exc_info:
         asyncio.run(adapter.send("hi"))
     assert "playwright" in str(exc_info.value).lower()
+
+
+def test_events_emits_start_then_token_per_growth_then_final() -> None:
+    from events.models import EventType
+
+    page = _FakePage(growth=["Hello", "Hello, world", "Hello, world", "Hello, world"])
+    adapter = BrowserTargetAdapter(_config(page))
+
+    async def _collect():
+        return [event async for event in adapter.events("hi")]
+
+    events = asyncio.run(_collect())
+    types = [event.type for event in events]
+    assert types[0] == EventType.START
+    assert types[-1] == EventType.FINAL
+    assert types.count(EventType.TOKEN) == 2  # "Hello" then "Hello, world" -- the repeats don't re-fire
+    assert events[-1].data["content"] == "Hello, world"
+
+
+def test_events_stops_polling_once_text_is_stable() -> None:
+    page = _FakePage(growth=["done"] * 10)
+    adapter = BrowserTargetAdapter(_config(page, stable_polls_required=2, wait_after_send_ms=10_000))
+
+    async def _collect():
+        return [event async for event in adapter.events("hi")]
+
+    asyncio.run(_collect())
+    # 1 token poll + 2 stable polls = 3 inner_text calls, not the ~40 the
+    # 10-second ceiling would allow if it never broke out early.
+    inner_text_calls = [call for call in page.calls if call[0] == "inner_text"]
+    assert len(inner_text_calls) == 3
+
+
+def test_send_still_returns_the_final_accumulated_text() -> None:
+    page = _FakePage(growth=["partial", "partial and more", "partial and more"])
+    adapter = BrowserTargetAdapter(_config(page))
+
+    response = asyncio.run(adapter.send("hi"))
+    assert response.text == "partial and more"
+    assert len(response.trace_events) >= 3  # start + >=1 token + final
+
+
+def test_browser_adapter_supports_streaming() -> None:
+    from targets.base import supports_streaming
+
+    adapter = BrowserTargetAdapter(_config(_FakePage()))
+    assert supports_streaming(adapter) is True

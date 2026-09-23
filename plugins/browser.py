@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, AsyncIterator, Callable
 
 from core.models import CapabilityProfile, TraceEvent
+from events.models import Event, EventType
 from plugins.registry import register_plugin
 from targets.base import TargetMetadata, TargetResponse
 from targets.errors import TargetConnectionError, TargetParseError
@@ -26,7 +27,16 @@ class BrowserTargetConfig:
     send_selector: str | None = None
     browser_type: str = "chromium"
     headless: bool = True
+    # P4.3-D (roadmap v4.3.0 Runtime Coverage Expansion): wait_after_send_ms
+    # is now a *ceiling*, not a single fixed sleep -- the page is polled
+    # every poll_interval_ms and a TOKEN event is emitted each time the
+    # response element's text grows, stopping early once it's stayed the
+    # same for stable_polls_required consecutive polls (or the ceiling is
+    # reached). A YAML config that only sets wait_after_send_ms keeps
+    # working exactly as before, just with real intermediate events now.
     wait_after_send_ms: int = 2000
+    poll_interval_ms: int = 250
+    stable_polls_required: int = 2
     capabilities: dict[str, bool] = field(default_factory=lambda: {"chat": True})
     page_session: Callable[[], Any] | None = None  # injectable async context manager factory, for tests
 
@@ -39,6 +49,15 @@ class BrowserTargetAdapter:
     listed in registered_plugin_names() fine even when Playwright isn't
     installed; only actually calling send()/healthcheck() requires it,
     with a clear error if it's missing.
+
+    P4.3-D (roadmap v4.3.0 Runtime Coverage Expansion): implements the
+    StreamingTargetAdapter protocol's events() too, honestly scoped to
+    what DOM polling can actually observe -- there is no real push-based
+    stream here the way WebSocket/SSE have one, so a TOKEN event is
+    emitted whenever the response element's text is observed to have
+    grown between polls, not as each token is truly generated. send()
+    is built on top of events(), the same shared-source-of-truth shape
+    events/sse_target.py and events/websocket_target.py already use.
     """
 
     def __init__(self, config: BrowserTargetConfig):
@@ -66,36 +85,68 @@ class BrowserTargetAdapter:
     async def capabilities(self) -> CapabilityProfile:
         return CapabilityProfile(**self.config.capabilities)
 
-    async def send(self, prompt: str, session: str | None = None) -> TargetResponse:
-        session_id = session or "default"
-        events = self._trace.setdefault(session_id, [])
+    async def events(self, prompt: str, session: str | None = None) -> AsyncIterator[Event]:
+        sequence = 0
 
         try:
             async with self._page_session() as page:
                 await page.goto(self.config.url)
+                sequence += 1
+                yield Event(type=EventType.START, sequence=sequence, data={"url": self.config.url})
+
                 await page.fill(self.config.input_selector, prompt)
                 if self.config.send_selector:
                     await page.click(self.config.send_selector)
                 else:
                     await page.press(self.config.input_selector, "Enter")
-                await page.wait_for_timeout(self.config.wait_after_send_ms)
-                text = await page.inner_text(self.config.response_selector)
+
+                previous_text = ""
+                stable_polls = 0
+                elapsed_ms = 0
+                while elapsed_ms < self.config.wait_after_send_ms:
+                    await page.wait_for_timeout(self.config.poll_interval_ms)
+                    elapsed_ms += self.config.poll_interval_ms
+                    current_text = await page.inner_text(self.config.response_selector)
+                    if current_text and current_text != previous_text:
+                        sequence += 1
+                        yield Event(
+                            type=EventType.TOKEN, sequence=sequence,
+                            data={"content": current_text, "response_selector": self.config.response_selector},
+                        )
+                        previous_text = current_text
+                        stable_polls = 0
+                    elif previous_text:
+                        stable_polls += 1
+                        if stable_polls >= self.config.stable_polls_required:
+                            break
+
+                if not previous_text:
+                    previous_text = await page.inner_text(self.config.response_selector)
         except (TargetConnectionError, TargetParseError):
             raise
         except Exception as exc:
             raise TargetConnectionError(f"browser automation against {self.config.url} failed: {exc}") from exc
 
-        if not text:
+        if not previous_text:
             raise TargetParseError(f"no text found at selector '{self.config.response_selector}'")
 
-        event = TraceEvent(
-            trace_id=session_id,
-            sequence=len(events) + 1,
-            event_type="browser_interaction",
-            metadata={"url": self.config.url, "response_selector": self.config.response_selector},
-        )
-        events.append(event)
-        return TargetResponse(prompt=prompt, text=text, metadata={"session": session_id}, trace_events=[event])
+        sequence += 1
+        yield Event(type=EventType.FINAL, sequence=sequence, data={"content": previous_text})
+
+    async def send(self, prompt: str, session: str | None = None) -> TargetResponse:
+        session_id = session or "default"
+        session_events = self._trace.setdefault(session_id, [])
+        call_trace_events: list[TraceEvent] = []
+        text = ""
+
+        async for event in self.events(prompt, session_id):
+            trace_event = _to_trace_event(session_id, event)
+            session_events.append(trace_event)
+            call_trace_events.append(trace_event)
+            if event.type == EventType.FINAL:
+                text = str(event.data.get("content", ""))
+
+        return TargetResponse(prompt=prompt, text=text, metadata={"session": session_id}, trace_events=call_trace_events)
 
     async def reset_session(self, session: str | None = None) -> None:
         self._trace.pop(session or "default", None)
@@ -162,9 +213,15 @@ def _build_browser_target(target: dict[str, Any]) -> BrowserTargetAdapter:
             browser_type=str(target.get("browser_type", "chromium")),
             headless=bool(target.get("headless", True)),
             wait_after_send_ms=int(target.get("wait_after_send_ms", 2000)),
+            poll_interval_ms=int(target.get("poll_interval_ms", 250)),
+            stable_polls_required=int(target.get("stable_polls_required", 2)),
             capabilities=dict(target.get("capabilities") or {"chat": True}),
         )
     )
+
+
+def _to_trace_event(session_id: str, event: Event) -> TraceEvent:
+    return TraceEvent(trace_id=session_id, sequence=event.sequence, event_type=event.type.value, metadata=event.data)
 
 
 register_plugin("browser", _build_browser_target)
