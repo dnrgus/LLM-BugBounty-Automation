@@ -20,7 +20,12 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: python -m pip install -e ".[dev]"
+        # P4.4-D (roadmap v4.4.0 Accuracy & Benchmark): includes the
+        # `jsts` extra so the JS/TS AST tests (tree-sitter) actually
+        # run here instead of silently skipping -- they'd been
+        # importorskip-ing on every CI run since v3.2.0/v4.2.0 because
+        # this step only ever installed `.[dev]`.
+        run: python -m pip install -e ".[dev,jsts]"
 
       - name: Lint (bug-catching rules only)
         run: ruff check .
@@ -33,6 +38,9 @@ jobs:
 
       - name: Judge benchmark gate
         run: python main.py judge-benchmark
+
+      - name: Ground-truth quality gate
+        run: python main.py quality-gate
 
       - name: Sample run smoke (fake targets)
         run: |

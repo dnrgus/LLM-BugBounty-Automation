@@ -1,0 +1,39 @@
+# P4.4-A (roadmap v4.4.0 Accuracy & Benchmark): known vulnerabilities
+# tests/fixtures/source/sample_app/app.py is documented to contain --
+# SOURCE MODE (`audit <path>`) is expected to find exactly these,
+# nothing more, nothing less. Kept in sync by hand with app.py; if the
+# fixture changes, this file must change with it.
+
+fixture_path: tests/fixtures/source/sample_app
+findings:
+  - id: sample-app-prompt-injection
+    asset_type: dataflow
+    file: tests/fixtures/source/sample_app/app.py
+    line: 15
+    sink_type: prompt_injection_sink
+    severity: medium
+    description: "request.json.get('message') reaches openai.ChatCompletion.create() unsanitized in chat()"
+
+  - id: sample-app-os-command-injection
+    asset_type: dataflow
+    file: tests/fixtures/source/sample_app/app.py
+    line: 22
+    sink_type: os_command
+    severity: critical
+    description: "request.args.get('cmd') reaches os.system() unsanitized in run_command()"
+
+  - id: sample-app-hardcoded-aws-key
+    asset_type: secret
+    file: tests/fixtures/source/sample_app/app.py
+    line: 9
+    secret_type: aws_access_key
+    severity: high
+    description: "hardcoded AWS access key pattern in API_KEY"
+
+  - id: sample-app-hardcoded-generic-key
+    asset_type: secret
+    file: tests/fixtures/source/sample_app/app.py
+    line: 9
+    secret_type: generic_api_key
+    severity: high
+    description: "the same literal also matches the generic API-key/secret/token pattern -- expected, not a false positive"

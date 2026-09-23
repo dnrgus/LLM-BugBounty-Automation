@@ -1,0 +1,21 @@
+# P4.4-A (roadmap v4.4.0 Accuracy & Benchmark): known vulnerabilities
+# tests/fixtures/source/express_app/app.js is documented to contain.
+#
+# Note: `const { exec } = require('child_process')` destructures the
+# callee to a bare `exec` identifier, so source/sinks/python.py's
+# dotted-name sink classifier matches it against the *Python* exec()
+# builtin's entry (sink_type "code_execution") rather than the
+# "child_process.exec" -> "os_command" entry -- a real classification
+# imprecision (this is genuinely OS command injection, not eval-style
+# code execution) that ground truth documents as observed, rather than
+# silently correcting to what the classifier "should" say.
+
+fixture_path: tests/fixtures/source/express_app
+findings:
+  - id: express-app-os-command-injection
+    asset_type: dataflow
+    file: tests/fixtures/source/express_app/app.js
+    line: 12
+    sink_type: code_execution
+    severity: critical
+    description: "req.query.cmd reaches the destructured exec() (child_process.exec) unsanitized in the /api/admin/run handler"
