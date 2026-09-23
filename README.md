@@ -107,6 +107,15 @@
 - Judge Event-Compatibility (4.3-E, `judges/signals.py`): 새 `StreamingAnomalyJudge` — 스트림 중간 error 이벤트, 또는 스트리밍된 토큰 내용이 최종 응답에서 사라진 경우(retraction/correction 신호)를 탐지. 기존 Judge는 전혀 재작성하지 않음(로드맵 헌장이 명시적으로 금지). `JudgeEnsemble.judge()`가 선택적 `trace_events` 파라미터를 받고, 이 judge가 목록에 있고 실제로 trace_events가 주어졌을 때만 `evaluate_events()`를 호출 — 기본 활성화 목록에는 없음(opt-in)
 - Release Hardening (4.3-F): 기존 555개 회귀 스위트 + 새 23개 테스트 전부 pass(총 578). **알려진 범위**: browser adapter의 events()는 진짜 스트림이 아니라 DOM polling 재구성; StreamingAnomalyJudge는 opt-in만 가능(기본 활성화 안 됨); SSE/WS 어댑터는 `--target-config` YAML 경로로만 선택 가능(기존 websocket과 동일하게, `scan`/`sample-run`의 `--target` 단축 옵션에는 아직 없음)
 
+**v4.4.0 Accuracy & Benchmark** (완료, `v4.4.0` 태그 — v4.1-v4.4 로드맵의 마지막 버전. SOURCE MODE가 실제로 알려진 취약점을 얼마나 잘 찾는지 측정하고 CI에서 그 정확도를 게이트로 검증):
+
+- Ground Truth Schema (4.4-A, `benchmarks/ground_truth.py`, `benchmarks/corpus/*.ground_truth.yaml`): 벤치마크 fixture가 포함하는 것으로 알려진 취약점을 `asset_type`/`file`/`sink_type`/`secret_type`(line은 선택)으로 문서화. `sample_app`(prompt injection, os command injection, 같은 하드코딩 키에 대한 secret 패턴 2개 매치)과 `express_app`(destructuring된 `exec()` 호출 — 실제로는 `os_command`가 아니라 `code_execution`으로 분류되는 것을 관찰된 그대로 문서화, 조용히 "고쳐서" 적지 않음)
+- Metric Engine (4.4-B, `benchmarks/metrics.py`): precision/recall/FPR/FNR/F1. 이 컨텍스트에는 "true negative" 공간이 없어서 FPR은 "예측한 finding 중 틀린 비율"로 정의(보안 벤치마킹 관례, 고전적 정의와 다름을 명시). `aggregate_accuracy_metrics`는 rate 평균이 아니라 원시 count를 합산
+- Matching & Scoring (4.4-C, `benchmarks/matcher.py`): ground truth가 실제로 다루는 asset_type만 false positive 후보로 취급 — parameter/endpoint/llm 같은 정상 신호는 취약점 주장이 아니므로 절대 false positive로 벌점받지 않음
+- CI Quality Gate (4.4-D, `python main.py quality-gate`): 코퍼스의 모든 fixture에 대해 SOURCE MODE를 실행하고 집계한 precision/recall이 기준(기본 0.85/0.85, 현재 실제 점수는 1.0/1.0) 밑으로 떨어지면 실패. `.github/workflows/ci.yml`에 새 단계로 연결. **덧붙여 발견/수정한 버그**: CI가 지금까지 `pip install -e ".[dev]"`만 실행해서 `jsts`(tree-sitter) extra가 한 번도 설치되지 않았음 — v3.2.0/v4.2.0 이후로 tree-sitter 의존 테스트 파일 6개가 CI에서 계속 조용히 skip되고 있었음(`pytest.importorskip`가 파일당 skip 1개로 집계되어 눈치채기 어려웠음). CI 설치 커맨드를 정확히 재현한 격리된 venv로 확인 후 `.[dev,jsts]`로 수정
+- Confidence Calibration (4.4-E, `benchmarks/calibration.py`): AttackSurfaceItem의 confidence가 실제로 정확도를 반영하는지 분석하는 리포팅 도구일 뿐, confidence 값 자체를 바꾸지 않음. true positive들이 평균적으로 false positive보다 높은 confidence를 갖는지만 확인
+- Release Hardening (4.4-F): 기존 578개 회귀 스위트 + 새 24개 테스트 전부 pass(총 602). **알려진 범위**: ground truth 코퍼스가 fixture 2개/finding 5개뿐이라 confidence calibration이 통계적으로 의미 있으려면 더 커져야 함; quality-gate는 SOURCE MODE 정적 결과만 검증하고 실제 동적 Finding의 reproduction-rate는 검증 안 함(라이브 대상이 필요하기 때문)
+
 ## 빠른 시작
 
 ```bash
@@ -482,6 +491,37 @@ v4.2.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - **SSE/WebSocket 대상은 `--target-config` YAML로만 선택 가능**: `scan`/`sample-run`의 `--target openai|fake-llm|...` 단축 옵션에는 아직 없음 — 기존 websocket 어댑터도 v4.3.0 이전부터 동일한 제약이었음
 - v4.2.0 절에 있던 항목들 계속 유효
 
+## v4.4.0 Release Gate
+
+"Accuracy & Benchmark" 게이트입니다 — v4.1.0-v4.4.0 로드맵의 마지막 버전. SOURCE MODE가 실제로 알려진 취약점을 정확히 찾아내는지 ground truth 코퍼스로 측정하고, 그 정확도를 CI 게이트로 검증하는 것이 v4.4.0의 완성 기준입니다.
+
+```bash
+pytest   # 602 passed
+ruff check .
+python main.py doctor
+python main.py judge-benchmark
+python main.py quality-gate   # precision/recall 1.0/1.0 (기준 0.85/0.85)
+```
+
+### v4.4.0 완료 범위
+
+- **Ground Truth Schema**: `benchmarks/corpus/*.ground_truth.yaml`, 2개 fixture/5개 documented finding (4.4-A)
+- **Metric Engine**: precision/recall/FPR/FNR/F1, raw count 기반 집계 (4.4-B)
+- **Matching & Scoring**: ground truth가 다루는 asset_type만 false positive 후보 (4.4-C)
+- **CI Quality Gate**: `python main.py quality-gate`, `.github/workflows/ci.yml`에 연결 + `jsts` extra 미설치로 6개 테스트 파일이 CI에서 조용히 skip되던 버그 발견/수정 (4.4-D)
+- **Confidence Calibration**: TP/FP 평균 confidence 비교 리포팅, 값 자체는 변경 안 함 (4.4-E)
+- **Regression**: 기존 578개 baseline을 포함한 전체 테스트 스위트가 100% pass (v4.3.0의 578 → 현재 602, 신규 24개)
+- **CI**: `.github/workflows/ci.yml`에 `quality-gate` 단계 추가 + `jsts` extra 설치 버그 수정
+
+### v4.4.0 알려진 제한사항 (Known Limitations)
+
+v4.3.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 생긴/여전히 남은 항목만 추가합니다.
+
+- **Ground truth 코퍼스가 아직 작음**: fixture 2개, finding 5개뿐 — confidence calibration이 통계적으로 의미 있으려면 코퍼스가 훨씬 커져야 함(4.4-E의 `is_well_calibrated`은 지금은 "비교할 게 없으면 true" 규칙에 자주 해당)
+- **FPR/FNR은 보안 벤치마킹 관례 정의**: 고전적인 true-negative 기반 FPR이 아니라 "예측한 finding 중 틀린 비율"(`benchmarks/metrics.py` docstring 참고) — 이 프로젝트의 static-analysis-vs-ground-truth 컨텍스트에는 무한한 true negative 공간이 없기 때문
+- **quality-gate는 SOURCE MODE 정적 결과만 검증**: 실제 동적 Finding의 reproduction-rate/live 정확도는 검증하지 않음 — 라이브 대상이 필요해서 CI의 결정론적/네트워크 없는 실행 원칙과 맞지 않음
+- v4.3.0 절에 있던 항목들 계속 유효
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -499,6 +539,7 @@ v4.2.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - `v4.1.0`: Dynamic Validation Expansion (validation contract, endpoint/auth/dataflow validator, Finding/Reproducer/Report 통합)
 - `v4.2.0`: Source Intelligence Expansion (LanguageSourceAnalyzer contract, NestJS 라우트, JS/TS dataflow/auth/AI SDK 탐지)
 - `v4.3.0`: Runtime Coverage Expansion (EventStream contract, HTTP SSE target, WebSocket/Browser event 통합, Judge event-compatibility)
+- `v4.4.0`: Accuracy & Benchmark (ground truth schema, metric engine, matching/scoring, CI quality gate, confidence calibration) — v4.1.0-v4.4.0 로드맵 완결
 
 ## 개발 흐름
 
