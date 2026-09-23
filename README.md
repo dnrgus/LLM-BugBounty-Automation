@@ -98,6 +98,15 @@
 - AI/RAG/Agent SDK Detection for JS/TS (4.2-E, `source/ai/python.py`): RAG/Agent 패턴은 이미 언어에 무관한 대소문자 무시 substring 매치라 추가 변경 없이 JS/TS도 인식됐음을 확인. LLM SDK 패턴만 Python의 `import X`/`from X import` 문법에 편향돼 있어서 JS `require('openai')`/ESM `import ... from '@anthropic-ai/sdk'` 인식을 추가
 - Release Hardening (4.2-F): 기존 512개 회귀 스위트 + 새 43개 테스트 전부 pass(총 555), Python 경로는 레지스트리 리팩터링 전후로 동작 완전히 동일함을 통합 테스트로 확인. **알려진 범위**: JS/TS dataflow tracer는 Python 버전과 달리 1-hop interprocedural이 없음(같은 파일의 다른 함수로 전달된 tainted 값은 추적 안 됨) — 의도적으로 좁힌 v1 범위, 필요해지면 이후 확장
 
+**v4.3.0 Runtime Coverage Expansion** (완료, `v4.3.0` 태그 — 스트리밍 응답 미지원이었던 known limitation을 해소하고, Judge가 최종 텍스트뿐 아니라 Event 스트림도 쓸 수 있게 확장):
+
+- EventStream Contract (4.3-A, `targets/base.py`): 기존 `TargetAdapter`에 `events()`를 *선택적으로* 추가하는 `StreamingTargetAdapter` — 기존 `send()`는 절대 대체하지 않음(Backward-compatible). `supports_streaming(target)`으로 호출자가 먼저 확인 가능. v3.0.0 시절부터 이미 있던 `events/models.py`(Event/EventType: START/TOKEN/RETRIEVAL/TOOL_CALL/FINAL/ERROR)와 `events/websocket_target.py`를 발견하고 그 위에 이 contract를 형식화함
+- HTTP SSE Target (4.3-B, `events/sse_target.py`): Server-Sent-Events/chunked-JSON 스트리밍 대상을 위한 범용 어댑터 — 기존 WebSocket 어댑터와 같은 패턴으로 `send()`가 자신의 `events()` 위에서 동작. `adapter: sse`로 target.yaml에서 선택(`config/targets/sse.example.yaml`)
+- WebSocket Event 통합 (4.3-C, `events/websocket_target.py`): 기존 어댑터도 `events()`를 구현하도록 리팩터링 — `send()`가 프레임 해석 루프를 중복 구현하던 것을 자신의 `events()`를 소비하는 방식으로 변경, 두 전송 방식이 실제로 하나의 contract로 통일됨을 증명
+- Browser/Agent Trace (4.3-D, `plugins/browser.py`): Playwright 기반 DOM 폴링을 한 번의 고정 대기 대신 주기적 polling으로 바꿔, 응답 텍스트가 늘어날 때마다 TOKEN 이벤트를 방출하고 안정화되면 조기 종료. **정직하게 범위를 제한**: 진짜 push 기반 스트림이 아니라 "마지막 poll 이후 텍스트가 늘어났다"는 재구성일 뿐이라고 docstring에 명시
+- Judge Event-Compatibility (4.3-E, `judges/signals.py`): 새 `StreamingAnomalyJudge` — 스트림 중간 error 이벤트, 또는 스트리밍된 토큰 내용이 최종 응답에서 사라진 경우(retraction/correction 신호)를 탐지. 기존 Judge는 전혀 재작성하지 않음(로드맵 헌장이 명시적으로 금지). `JudgeEnsemble.judge()`가 선택적 `trace_events` 파라미터를 받고, 이 judge가 목록에 있고 실제로 trace_events가 주어졌을 때만 `evaluate_events()`를 호출 — 기본 활성화 목록에는 없음(opt-in)
+- Release Hardening (4.3-F): 기존 555개 회귀 스위트 + 새 23개 테스트 전부 pass(총 578). **알려진 범위**: browser adapter의 events()는 진짜 스트림이 아니라 DOM polling 재구성; StreamingAnomalyJudge는 opt-in만 가능(기본 활성화 안 됨); SSE/WS 어댑터는 `--target-config` YAML 경로로만 선택 가능(기존 websocket과 동일하게, `scan`/`sample-run`의 `--target` 단축 옵션에는 아직 없음)
+
 ## 빠른 시작
 
 ```bash
@@ -443,6 +452,36 @@ v4.1.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - **Flask/FastAPI 이외 Python 프레임워크나 Django/Spring/Rails/Gin 등은 여전히 route/dataflow/auth AST 지원이 없음**: `source/ingestion.py`의 `_FRAMEWORK_SIGNATURES`는 이들을 감지만 하고(매니페스트 파일 기반), 실제 route/dataflow 추출은 Python(Flask/FastAPI)과 JS/TS(Express/Next.js/NestJS)로 한정됨
 - v4.1.0 절에 있던 항목들 계속 유효 (endpoint validator가 HYBRID CLI에 자동 연결되지 않음, auth/dataflow validator가 호출자 컨텍스트 필요)
 
+## v4.3.0 Release Gate
+
+"Runtime Coverage Expansion" 게이트입니다. v4.2.0까지 없던 SSE/WebSocket 스트리밍 대상 지원을 하나의 EventStream contract로 통일하고, Judge가 최종 텍스트 이외에 Event 스트림도 근거로 쓸 수 있게 여는 것이 v4.3.0의 완성 기준입니다.
+
+```bash
+pytest   # 578 passed
+ruff check .
+python main.py doctor
+python main.py judge-benchmark
+```
+
+### v4.3.0 완료 범위
+
+- **EventStream Contract**: `StreamingTargetAdapter`(선택적 `events()`), `supports_streaming()` (4.3-A)
+- **HTTP SSE Target**: `adapter: sse`, `send()`가 `events()` 위에서 동작 (4.3-B)
+- **WebSocket Event 통합**: 기존 어댑터도 같은 `events()` contract 구현 (4.3-C)
+- **Browser/Agent Trace**: DOM polling 기반 TOKEN/FINAL 이벤트, 조기 종료 (4.3-D)
+- **Judge Event-Compatibility**: `StreamingAnomalyJudge`(opt-in), 기존 Judge 전혀 재작성 없음 (4.3-E)
+- **Regression**: 기존 555개 baseline을 포함한 전체 테스트 스위트가 100% pass (v4.2.0의 555 → 현재 578, 신규 23개)
+- **CI**: 기존 `.github/workflows/ci.yml`이 변경 없이 그대로 통과
+
+### v4.3.0 알려진 제한사항 (Known Limitations)
+
+v4.2.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 생긴/여전히 남은 항목만 추가합니다.
+
+- **Browser adapter의 `events()`는 진짜 스트림이 아님**: Playwright DOM polling으로 "지난 poll 이후 텍스트가 늘어났다"를 재구성한 것 — WebSocket/SSE처럼 실제 push 기반 이벤트가 아님. 토큰 경계도 실제 생성 시점과 무관하게 poll 주기에 따라 달라짐
+- **StreamingAnomalyJudge는 기본 비활성화**: `JudgeEnsemble.default()`의 활성화 목록에 없음 — testcase가 `judges: [..., streaming_anomaly]`로 명시적으로 opt-in해야 동작 (Feature flag first 원칙)
+- **SSE/WebSocket 대상은 `--target-config` YAML로만 선택 가능**: `scan`/`sample-run`의 `--target openai|fake-llm|...` 단축 옵션에는 아직 없음 — 기존 websocket 어댑터도 v4.3.0 이전부터 동일한 제약이었음
+- v4.2.0 절에 있던 항목들 계속 유효
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -459,6 +498,7 @@ v4.1.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - `v4.0.0`: 실전 완성판 — 로드맵이 권장하는 최종 목표 (URL/Source/Both 세 입력 모두 end-to-end)
 - `v4.1.0`: Dynamic Validation Expansion (validation contract, endpoint/auth/dataflow validator, Finding/Reproducer/Report 통합)
 - `v4.2.0`: Source Intelligence Expansion (LanguageSourceAnalyzer contract, NestJS 라우트, JS/TS dataflow/auth/AI SDK 탐지)
+- `v4.3.0`: Runtime Coverage Expansion (EventStream contract, HTTP SSE target, WebSocket/Browser event 통합, Judge event-compatibility)
 
 ## 개발 흐름
 
