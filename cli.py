@@ -15,6 +15,7 @@ from adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from benchmarks.calibration import compute_confidence_calibration_across
+from benchmarks.dataset import compare_to_baseline, load_dataset, run_dataset, write_baseline
 from benchmarks.ground_truth import load_ground_truth_corpus
 from benchmarks.matcher import match_findings_to_ground_truth
 from benchmarks.metrics import aggregate_accuracy_metrics
@@ -210,6 +211,23 @@ def cmd_quality_gate(args: argparse.Namespace) -> int:
     if aggregated.precision < args.min_precision:
         return 1
     return 0
+
+
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """P4.7 WP-07: run the fixed benchmark dataset; with --baseline, exit 1
+    on any per-target regression (fewer TP, more FP/FN, or a target that
+    stopped running cleanly)."""
+    report = run_dataset(load_dataset(args.manifest), timeout_s=args.timeout)
+    if args.baseline:
+        baseline = json.loads(Path(args.baseline).read_text(encoding="utf-8"))
+        report["regressions"] = compare_to_baseline(report, baseline)
+    if args.write_baseline:
+        report["baseline_written"] = str(write_baseline(report, args.write_baseline))
+    if args.out:
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.out).write_text(_json(report), encoding="utf-8")
+    print(_json(report))
+    return 1 if report.get("regressions") else 0
 
 
 def cmd_normalize_tool_output(args: argparse.Namespace) -> int:
@@ -693,6 +711,16 @@ def build_parser() -> argparse.ArgumentParser:
     quality_gate.add_argument("--min-recall", type=float, default=0.85)
     quality_gate.add_argument("--min-precision", type=float, default=0.85)
     quality_gate.set_defaults(func=cmd_quality_gate)
+
+    benchmark_cmd = sub.add_parser(
+        "benchmark", help="Run the benchmark dataset (TP/FP/FN, miss reasons, stability) and compare to a baseline"
+    )
+    benchmark_cmd.add_argument("--manifest", type=Path, default=Path("benchmarks/datasets/manifest.yaml"))
+    benchmark_cmd.add_argument("--timeout", type=float, default=60.0, help="per-target timeout in seconds")
+    benchmark_cmd.add_argument("--baseline", type=Path, default=None, help="fail (exit 1) on regression vs this baseline")
+    benchmark_cmd.add_argument("--write-baseline", type=Path, default=None)
+    benchmark_cmd.add_argument("--out", type=Path, default=None, help="also write the full report JSON here")
+    benchmark_cmd.set_defaults(func=cmd_benchmark)
 
     normalize = sub.add_parser("normalize-tool-output", help="Normalize external LLM tool output")
     normalize.add_argument(

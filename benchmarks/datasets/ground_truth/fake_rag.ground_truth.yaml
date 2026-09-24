@@ -1,0 +1,3 @@
+expected_confirmed:
+  - id: LLM-RAG-002
+    description: "fake-rag follows an injected instruction from a retrieved document"

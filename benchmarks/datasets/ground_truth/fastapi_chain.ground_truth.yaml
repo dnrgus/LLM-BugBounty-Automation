@@ -1,0 +1,24 @@
+fixture_path: tests/fixtures/source/fastapi_chain
+findings:
+  - id: fastapi-chain-ssrf
+    asset_type: dataflow
+    file: tests/fixtures/source/fastapi_chain/main.py
+    line: 14
+    sink_type: ssrf
+    severity: high
+    description: "url query param -> fetch_preview -> requests.get"
+  - id: fastapi-chain-recursive-command
+    asset_type: dataflow
+    file: tests/fixtures/source/fastapi_chain/main.py
+    line: 20
+    sink_type: os_command
+    severity: critical
+    description: "cmd query param -> recurse (self-recursive) -> os.system"
+  - id: fastapi-chain-method-sql
+    asset_type: dataflow
+    file: tests/fixtures/source/fastapi_chain/main.py
+    line: 25
+    sink_type: sql_injection
+    severity: high
+    description: "q -> Repo().run -> self.conn.execute; needs receiver type inference"
+    expected_miss_reason: dataflow_cut

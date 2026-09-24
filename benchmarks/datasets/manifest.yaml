@@ -1,0 +1,62 @@
+# P4.7 WP-07 (v5.0 plan 7.1): the benchmark dataset -- the SAME list is
+# re-run every version so results are comparable (plan 7.2).
+#
+# kind: source      -> SOURCE MODE static analysis scored against ground truth
+# kind: llm_target  -> offline sample-run against a fake LLM/RAG/agent target
+# kind: external    -> a real intentionally-vulnerable app you cloned yourself;
+#                      `path_env` names the env var holding its local path, the
+#                      entry is reported "skipped" when it's unset. Only add apps
+#                      you are licensed to run locally.
+#
+# holdout: true entries are reported separately and must not be used to tune
+# detection logic (plan section 10: benchmark overfitting control).
+schema_version: 1
+name: v5-benchmark
+targets:
+  - id: sample_app
+    group: llm_app
+    kind: source
+    path: tests/fixtures/source/sample_app
+    ground_truth: benchmarks/corpus/sample_app.ground_truth.yaml
+  - id: layered_flask_app
+    group: python_web
+    kind: source
+    path: tests/fixtures/source/layered_flask_app
+    ground_truth: benchmarks/corpus/layered_flask_app.ground_truth.yaml
+  - id: fastapi_chain
+    group: python_web
+    kind: source
+    path: tests/fixtures/source/fastapi_chain
+    ground_truth: benchmarks/datasets/ground_truth/fastapi_chain.ground_truth.yaml
+  - id: express_app
+    group: jsts_web
+    kind: source
+    path: tests/fixtures/source/express_app
+    ground_truth: benchmarks/corpus/express_app.ground_truth.yaml
+  - id: express_wrapper
+    group: jsts_web
+    kind: source
+    path: tests/fixtures/source/express_wrapper
+    ground_truth: benchmarks/datasets/ground_truth/express_wrapper.ground_truth.yaml
+    holdout: true
+  - id: fake_llm
+    group: llm_app
+    kind: llm_target
+    target: fake-llm
+    ground_truth: benchmarks/datasets/ground_truth/fake_llm.ground_truth.yaml
+  - id: fake_rag
+    group: llm_app
+    kind: llm_target
+    target: fake-rag
+    ground_truth: benchmarks/datasets/ground_truth/fake_rag.ground_truth.yaml
+  - id: fake_agent
+    group: llm_app
+    kind: llm_target
+    target: fake-agent
+    ground_truth: benchmarks/datasets/ground_truth/fake_agent.ground_truth.yaml
+  # Example external entry (uncomment and point the env var at your clone):
+  # - id: my_local_vuln_app
+  #   group: web_api
+  #   kind: external
+  #   path_env: BENCH_MY_APP_PATH
+  #   ground_truth: benchmarks/datasets/ground_truth/my_local_vuln_app.ground_truth.yaml

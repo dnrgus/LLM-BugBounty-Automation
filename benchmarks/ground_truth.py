@@ -29,6 +29,10 @@ class GroundTruthFinding:
     secret_type: str | None = None
     severity: str = "medium"
     description: str = ""
+    # P4.7 WP-07: a *known* miss, documented with its root cause (see
+    # benchmarks/dataset.py MISS_REASONS). Still counted as a false
+    # negative -- this only explains it, never excludes it.
+    expected_miss_reason: str | None = None
 
     def matches(self, item: AttackSurfaceItem) -> bool:
         if item.asset_type != self.asset_type:
@@ -47,7 +51,7 @@ class GroundTruthFinding:
         return {
             "id": self.id, "asset_type": self.asset_type, "file": self.file, "line": self.line,
             "sink_type": self.sink_type, "secret_type": self.secret_type, "severity": self.severity,
-            "description": self.description,
+            "description": self.description, "expected_miss_reason": self.expected_miss_reason,
         }
 
 
