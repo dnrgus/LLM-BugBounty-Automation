@@ -19,6 +19,10 @@ testing:
   destructive_actions: false
   denial_of_service: false
   cross_user_data_access: false
+  # v4.5 WP-01: POST/PUT/PATCH/DELETE handling -- dry_run (plan+record, never
+  # send; default) | review_required | allowed. DELETE also needs
+  # destructive_actions: true and no `delete` in blocked_actions.
+  state_changing_requests: dry_run
 limits:
   requests_per_second: 2
   concurrency: 3

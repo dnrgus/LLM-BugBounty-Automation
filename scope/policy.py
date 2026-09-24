@@ -11,6 +11,23 @@ from urllib.parse import urlparse
 import yaml
 
 
+READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH"})
+DESTRUCTIVE_METHODS = frozenset({"DELETE"})
+_STATE_CHANGING_MODES = {"dry_run", "review_required", "allowed"}
+
+
+def method_risk(method: str) -> str:
+    """"read_only" | "state_changing" | "destructive". An unknown verb
+    is treated as state-changing -- never assumed safe."""
+    normalized = method.strip().upper()
+    if normalized in READ_ONLY_METHODS:
+        return "read_only"
+    if normalized in DESTRUCTIVE_METHODS:
+        return "destructive"
+    return "state_changing"
+
+
 @dataclass(frozen=True)
 class PolicyDecision:
     allowed: bool
@@ -120,6 +137,51 @@ class PolicyEngine:
         if action in self.config.get("approval_required", []):
             return PolicyDecision(False, "approval required", action=action, mode="simulate")
         return PolicyDecision(True, "action allowed", action=action)
+
+    def decide_method(self, method: str) -> PolicyDecision:
+        """P4.5 WP-01 (v5.0 plan 5.1): the one gate every validator asks
+        before sending a request with a given HTTP method. Read-only
+        methods always execute (scope is still checked separately via
+        validate_url). State-changing methods default to "dry_run" --
+        the request is planned and recorded, never sent -- unless the
+        program config opts in via `testing.state_changing_requests`
+        ("dry_run" | "review_required" | "allowed"). DELETE is
+        destructive and additionally needs `testing.destructive_actions:
+        true`; a "delete" entry in blocked_actions blocks it outright.
+        """
+        normalized = method.strip().upper()
+        risk = method_risk(normalized)
+        metadata = {"method": normalized, "risk": risk}
+        if risk == "read_only":
+            return PolicyDecision(True, "read-only method", action="http_method", metadata=metadata)
+
+        blocked_actions = set(self.config.get("blocked_actions", []))
+        if risk == "destructive" and "delete" in blocked_actions:
+            return PolicyDecision(False, "delete blocked by program policy", action="http_method", mode="block", metadata=metadata)
+
+        testing = self.config.get("testing", {})
+        setting = str(testing.get("state_changing_requests", "dry_run"))
+        if setting not in _STATE_CHANGING_MODES:
+            setting = "dry_run"
+        if setting == "allowed" and risk == "destructive" and not testing.get("destructive_actions", False):
+            setting = "review_required"
+        if setting == "allowed":
+            return PolicyDecision(True, "state-changing method allowed by program policy", action="http_method", metadata=metadata)
+        reason = (
+            "state-changing method requires human review before sending"
+            if setting == "review_required"
+            else "state-changing method is dry-run only (planned, never sent)"
+        )
+        return PolicyDecision(False, reason, action="http_method", mode=setting, metadata=metadata)
+
+    def validate_request(self, url: str, method: str) -> PolicyDecision:
+        """Scope + method in one call -- the common gate WP-03's
+        `validate` CLI path runs before any request, whatever the
+        validator."""
+        url_decision = self.validate_url(url)
+        if not url_decision.allowed:
+            return url_decision
+        return self.decide_method(method)
 
     def consume_request_budget(self, amount: int = 1) -> PolicyDecision:
         if amount < 1:

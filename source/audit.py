@@ -4,6 +4,7 @@ from pathlib import Path
 
 from attack_surface.models import AttackSurfaceItem
 from source.analyzers import analyze_files
+from source.endpoints import build_endpoint_inventory
 from source.ingestion import SourceIngestionResult, ingest_source
 from source.routes import extract_routes
 
@@ -45,4 +46,7 @@ def audit_source(root: Path | str, max_files: int = 2000) -> dict[str, object]:
             "by_asset_type": by_asset_type,
             "items": [item.to_dict() for item in items],
         },
+        # P4.5 WP-01: one entry per (route, concrete method) -- state-
+        # changing methods included, with inferred request shape.
+        "endpoint_inventory": [spec.to_dict() for spec in build_endpoint_inventory(items)],
     }

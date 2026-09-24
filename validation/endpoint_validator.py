@@ -5,7 +5,8 @@ from urllib.parse import urljoin
 
 import httpx
 
-from scope.policy import PolicyEngine
+from scope.policy import PolicyEngine, method_risk
+from validation.contract import ValidationStatus
 
 # P4.1-B (roadmap v4.1.0 Dynamic Validation Expansion): never probe with
 # a destructive verb regardless of what a candidate declares (POST/PUT/
@@ -143,3 +144,124 @@ async def _probe_one(client: httpx.AsyncClient, url: str, method: str, policy: P
     return EndpointObservation(
         method=method, status_code=None, content_type=None, redirect_chain=redirect_chain, error="max redirect hops exceeded"
     )
+
+
+@dataclass(frozen=True)
+class PlannedRequest:
+    """What *would* be sent for a state-changing request the method gate
+    didn't allow -- recorded instead of sent. Body field names only,
+    never values."""
+
+    method: str
+    url: str
+    body_format: str
+    body_fields: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        return {"method": self.method, "url": self.url, "body_format": self.body_format, "body_fields": list(self.body_fields)}
+
+
+@dataclass(frozen=True)
+class RequestValidationEvidence:
+    """P4.5 WP-01: evidence for one EndpointSpec-driven request.
+    `execution_mode` is the method gate's verdict -- "execute",
+    "dry_run", "review_required" or "block" -- so a report can always
+    tell "sent and observed" apart from "planned but deliberately not
+    sent"."""
+
+    candidate_url: str
+    method: str
+    risk: str
+    execution_mode: str
+    reason: str
+    observation: EndpointObservation | None = None
+    planned_request: PlannedRequest | None = None
+
+    @property
+    def status(self) -> ValidationStatus:
+        if self.execution_mode == "block":
+            return ValidationStatus.BLOCKED
+        if self.execution_mode in {"dry_run", "review_required"}:
+            return ValidationStatus.REVIEW_ONLY
+        if self.observation is None or self.observation.status_code is None:
+            return ValidationStatus.UNSTABLE
+        return ValidationStatus.CONFIRMED
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "candidate_url": self.candidate_url,
+            "method": self.method,
+            "risk": self.risk,
+            "execution_mode": self.execution_mode,
+            "reason": self.reason,
+            "observation": self.observation.to_dict() if self.observation else None,
+            "planned_request": self.planned_request.to_dict() if self.planned_request else None,
+            "status": self.status.value,
+        }
+
+
+def _encode_body(body_format: str, body: dict[str, object] | None) -> dict[str, object]:
+    if body is None or body_format == "none":
+        return {}
+    if body_format == "json":
+        return {"json": body}
+    # multipart/form: sent as form fields only -- this validator never
+    # fabricates file uploads.
+    return {"data": {key: str(value) for key, value in body.items()}}
+
+
+async def validate_endpoint_request(
+    url: str,
+    method: str,
+    policy: PolicyEngine,
+    body_format: str = "none",
+    body_fields: list[str] | None = None,
+    example_body: dict[str, object] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout_seconds: float = 10.0,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> RequestValidationEvidence:
+    """P4.5 WP-01 (v5.0 plan 5.1): sends one request with the spec's own
+    method -- including POST/PUT/PATCH/DELETE -- but only once the
+    common gate (scope, then PolicyEngine.decide_method) says "execute".
+
+    A state-changing request is additionally never sent with a
+    synthesized body: it needs a captured or user-supplied example body
+    ("자동 검증은 기본적으로 무해한 파라미터 변경과 비교 요청에 제한"), otherwise it
+    stays review_required. Redirects are not followed for state-changing
+    methods (a 307/308 would replay the body elsewhere).
+    """
+    normalized = method.strip().upper()
+    risk = method_risk(normalized)
+    scope_decision = policy.validate_url(url)
+    if not scope_decision.allowed:
+        return RequestValidationEvidence(url, normalized, risk, "block", scope_decision.reason)
+
+    planned = PlannedRequest(normalized, url, body_format, list(body_fields or []))
+    method_decision = policy.decide_method(normalized)
+    if not method_decision.allowed:
+        return RequestValidationEvidence(
+            url, normalized, risk, method_decision.mode, method_decision.reason, planned_request=planned
+        )
+
+    if risk == "read_only":
+        async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False, transport=transport) as client:
+            observation = await _probe_one(client, url, normalized, policy)
+        return RequestValidationEvidence(url, normalized, risk, "execute", method_decision.reason, observation=observation)
+
+    if body_format != "none" and example_body is None:
+        return RequestValidationEvidence(
+            url, normalized, risk, "review_required",
+            "no captured or user-supplied example body; a state-changing body is never synthesized",
+            planned_request=planned,
+        )
+
+    async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=False, transport=transport) as client:
+        try:
+            response = await client.request(normalized, url, headers=headers, **_encode_body(body_format, example_body))
+            observation = EndpointObservation(
+                method=normalized, status_code=response.status_code, content_type=response.headers.get("content-type")
+            )
+        except httpx.HTTPError as exc:
+            observation = EndpointObservation(method=normalized, status_code=None, content_type=None, error=str(exc))
+    return RequestValidationEvidence(url, normalized, risk, "execute", method_decision.reason, observation=observation)
