@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 
 import yaml
 
+from core.contract import check_schema_version
+
 
 READ_ONLY_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH"})
@@ -62,6 +64,8 @@ class BudgetState:
 
 class PolicyEngine:
     def __init__(self, config: dict[str, Any]):
+        # P5.0 WP-09: frozen scope/policy schema (absent = version 1).
+        check_schema_version("scope_policy", config.get("schema_version"))
         self.config = config
         snapshot = json.dumps(config, sort_keys=True, separators=(",", ":"))
         self.policy_hash = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()

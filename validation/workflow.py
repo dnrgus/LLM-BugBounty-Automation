@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 
+from core.contract import SCHEMA_VERSIONS
 from core.models import Finding, FindingStatus, Reproduction, Run, new_id, utc_now
 from reporting.evidence import write_evidence_bundle
 from reporting.integrity import build_run_manifest
@@ -22,7 +23,7 @@ from validation.planner import generate_validation_plans
 # CLI flow. `scan` writes one JSON artifact every later step reads, so
 # each step can be re-run on its own without redoing static analysis.
 
-SCAN_ARTIFACT_SCHEMA_VERSION = "1"
+SCAN_ARTIFACT_SCHEMA_VERSION = str(SCHEMA_VERSIONS["scan_artifact"])
 
 
 def build_scan_artifact(
@@ -175,6 +176,7 @@ async def reproduce_validation_finding(
     auth_contexts: AuthContextSet | None,
     attempts: int = 3,
     transport: httpx.AsyncBaseTransport | None = None,
+    environment: dict[str, object] | None = None,
 ) -> dict[str, object]:
     """Re-runs the same object access comparison `attempts` times under
     the same conditions and stores attempts/successes/results. A success
@@ -206,7 +208,10 @@ async def reproduce_validation_finding(
     store.insert_reproduction(reproduction)
     stored = _record(
         store, finding.run_id, "reproduction", f"{finding.id}_{reproduction.id}",
-        {"finding_id": finding.id, "original_verdict": original, "verdicts": verdicts, "results": results},
+        {
+            "finding_id": finding.id, "original_verdict": original, "verdicts": verdicts, "results": results,
+            "environment": environment or {},
+        },
     )
     return {
         "finding_id": finding.id,
@@ -270,6 +275,7 @@ def write_validation_report(store: SQLiteStore, run_id: str, out_dir: Path | str
             f"python main.py reproduce {finding.id} --auth-contexts <auth.yaml>",
         ]
         payload = {
+            "schema_version": SCHEMA_VERSIONS["validation_report"],
             "finding_id": finding.id,
             "title": finding.title,
             "status": finding.status.value,

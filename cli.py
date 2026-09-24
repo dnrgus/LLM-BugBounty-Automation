@@ -4,7 +4,10 @@ import argparse
 import asyncio
 import json
 import signal
+import sys
 from pathlib import Path
+
+import yaml
 
 from adapters.llm.garak import GarakAdapter
 from adapters.llm.promptfoo import PromptfooAdapter
@@ -21,6 +24,7 @@ from benchmarks.matcher import match_findings_to_ground_truth
 from benchmarks.metrics import aggregate_accuracy_metrics
 from core.budget import AttackBudget
 from core.cancel import CancellationToken
+from core.contract import execution_environment, file_sha256
 from core.fingerprint import build_environment_fingerprint
 from core.models import Run
 from core.orchestrator import (
@@ -296,7 +300,14 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
     finding = store.get_finding(args.finding_id)
     if finding is not None and is_replayable_validation_finding(finding):
         contexts = load_auth_contexts(args.auth_contexts) if args.auth_contexts else None
-        result = asyncio.run(reproduce_validation_finding(finding, policy, store, contexts, attempts=args.attempts))
+        environment = execution_environment(
+            validator_type="object_access", attempts=args.attempts, scope_sha256=file_sha256(args.scope),
+            auth_contexts_sha256=file_sha256(args.auth_contexts),
+        )
+        result = asyncio.run(
+            reproduce_validation_finding(finding, policy, store, contexts, attempts=args.attempts, environment=environment)
+        )
+        result["environment"] = environment
         print(_json(result))
         return 0
     testcases = load_testcases(args.testcases)
@@ -310,6 +321,12 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
             target_config=args.target_config,
             minimize=args.minimize,
         )
+    )
+    # P5.0 WP-09: every reproduction records its execution conditions.
+    result["environment"] = execution_environment(
+        target_kind=args.target, target_config=str(args.target_config) if args.target_config else None,
+        target_config_sha256=file_sha256(args.target_config), testcases_sha256=file_sha256(args.testcases),
+        scope_sha256=file_sha256(args.scope), minimize=args.minimize,
     )
     print(_json(result))
     return 0
@@ -912,4 +929,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (FileNotFoundError, ValueError, yaml.YAMLError) as exc:
+        # P5.0 WP-09: input/config errors are exit code 3 with a JSON
+        # error on stderr, never a traceback (core/contract.py EXIT_CODES).
+        print(_json({"error": type(exc).__name__, "detail": str(exc)}), file=sys.stderr)
+        return 3
