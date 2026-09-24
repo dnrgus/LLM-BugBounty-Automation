@@ -234,6 +234,15 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
     return 1 if report.get("regressions") else 0
 
 
+def cmd_release_check(args: argparse.Namespace) -> int:
+    """P5.0 WP-10: the v5.0.0 release gate (plan 8.3) as an offline checklist."""
+    from core.release_check import run_release_check
+
+    result = run_release_check(only=args.gate)
+    print(_json(result))
+    return 0 if result["passed"] else 1
+
+
 def cmd_normalize_tool_output(args: argparse.Namespace) -> int:
     adapter = _adapter_for_tool(args.tool)
     results = adapter.parse_file(args.input, run_id=args.run_id, target_id=args.target_id, version=args.version)
@@ -738,6 +747,12 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_cmd.add_argument("--write-baseline", type=Path, default=None)
     benchmark_cmd.add_argument("--out", type=Path, default=None, help="also write the full report JSON here")
     benchmark_cmd.set_defaults(func=cmd_benchmark)
+
+    release_check = sub.add_parser(
+        "release-check", help="Run the v5.0.0 release gate checklist offline (G1-G10); exit 1 if any gate fails"
+    )
+    release_check.add_argument("--gate", action="append", default=None, help="run only this gate id (repeatable), e.g. G5")
+    release_check.set_defaults(func=cmd_release_check)
 
     normalize = sub.add_parser("normalize-tool-output", help="Normalize external LLM tool output")
     normalize.add_argument(

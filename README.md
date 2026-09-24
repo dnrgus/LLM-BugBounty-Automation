@@ -574,6 +574,49 @@ python main.py sample-run --semantic-judge-config config/semantic_judge.example.
 - Python interprocedural: class method 호출(`self.repo.find(x)`)은 receiver 타입 추론 없이 명시적으로 끊김(추측하지 않음), sanitizer 인식 없음
 - Semantic judge는 기본 비활성, `sample-run` 경로에만 연결됨
 
+## v5.0.0 Release Gate — 기능 동결
+
+v5.0.0은 "더 이상 기능을 추가하지 않아도 된다"는 기준선입니다. 지원 범위와 미지원 범위를 문서로 구분하고, 그 범위 안에서 탐지 → 안전 검증 → 재현 → 증거 → 보고를 끝까지 수행합니다. 이후 개선은 실제 허가된 대상에서 반복 확인된 실패만 5.0.x 패치로 반영합니다.
+
+```bash
+pytest                        # 701 passed
+pytest -m "p0 or p1" tests/regression
+python main.py release-check  # G1-G10 모두 통과해야 exit 0 (offline)
+python main.py benchmark --baseline benchmarks/baselines/baseline.json
+```
+
+| Gate | 계획서 8.3 항목 | 점검 방법 (`release-check`) |
+|---|---|---|
+| G1 | 샘플 프로젝트 end-to-end 실행 | `scan --source` → `sample-run` → `validate` → `report` → `reproduce` |
+| G2 | scope 밖 대상 실행 전 차단 | 모든 validator에서 scope 밖 요청 0건 |
+| G3 | 상태 변경 요청은 정책 없이 자동 실행 안 됨 | 기본 정책에서 POST/PUT/PATCH/DELETE 전송 0건 |
+| G4 | LLM finding 대표 세트 재현 | fake-llm/fake-rag confirmed finding 재현 성공 |
+| G5 | Auth/BOLA 비교가 테스트 계정 환경에서 동작 | 소유권 검사 있음 → rejected, 없음 → confirmed, 계정 1개 → needs_review |
+| G6 | Python/JS-TS dataflow regression | quality-gate + benchmark baseline 회귀 0건 |
+| G7 | evidence hash 검증 및 redaction | hash 검증, 자격증명/canary redaction, 변조 감지 |
+| G8 | report에 근거·재현 절차 누락 없음 | 필수 필드(`core/contract.py`) 모두 채워짐 |
+| G9 | known limitation 문서 | `docs/KNOWN_LIMITATIONS.md`, `docs/SUPPORT_MATRIX.md` |
+| G10 | benchmark 결과와 데이터셋 범위 명시 | v4.7.0 절의 표 + 외부 앱 미포함 명시 |
+
+### v5.0.0 문서
+
+- `docs/CLI.md` — 전체 명령/옵션, exit code(0/1/2/3/130), finding 상태 (parser에서 생성, 테스트로 동기화 강제)
+- `docs/SCHEMAS.md` — 고정된 schema 버전, scope/policy 키, evidence 디렉터리 구조와 manifest, report 필수 필드, 재현 기록
+- `docs/SUPPORT_MATRIX.md` — v5.0 지원/미지원 범위
+- `docs/KNOWN_LIMITATIONS.md` — 통합된 알려진 제한사항
+
+### v5.0.0 이후 운영 원칙
+
+| 상황 | 처리 | 예시 버전 |
+|---|---|---|
+| crash / scope / integrity 버그 | 즉시 수정 | 5.0.1 |
+| 반복 미탐/오탐 | 재현 케이스를 benchmark에 추가한 뒤 탐지 로직 수정 | 5.0.2 |
+| report/evidence 품질 | schema 호환 유지하며 보완 | 5.0.3 |
+| 새 framework 요청 | 실전 반복 필요성 없으면 보류 | 미정 |
+| 대규모 구조 변경 | 5.x에 억지로 넣지 않음 | 6.0 검토 |
+
+실전 테스트 기록은 Target / Expected / Observed / Outcome(TP·FP·FN·Blocked·Error) / Root Cause / Fix Decision / Regression 항목으로 남기고, 수정 시 `benchmarks/datasets/manifest.yaml`에 케이스를 추가합니다.
+
 ## v4.7.0 Release Gate
 
 "실전 Benchmark와 안정화" 게이트입니다 (v5.0 개발 계획서 WP-07, WP-08). 이 단계부터는 기능 추가보다 측정 결과를 우선합니다.
@@ -629,6 +672,7 @@ python main.py benchmark --baseline benchmarks/baselines/baseline.json   # 회�
 - `v4.5.0`: API/Auth 검증 연결 (HTTP method/body inventory + 상태 변경 정책 gate, tester-owned auth context 비교, scan -> validate -> reproduce -> report CLI)
 - `v4.6.0`: 분석 정확도와 Judge 보강 (Python interprocedural dataflow + caps, semantic judge 보조 layer / needs_review) — JS/TS 함수 간 추적은 제한사항
 - `v4.7.0`: 실전 Benchmark와 안정화 (dataset manifest + baseline 회귀 게이트, 미탐 원인 분류, crash/timeout 격리, evidence 재검증, P0/P1 회귀 스위트)
+- `v5.0.0`: 기능 동결 — 고정된 계약(schema/exit code/finding 상태/report 필드), 재현 환경 기록, 문서(CLI/schema/지원 matrix/제한사항), offline release gate `release-check` G1-G10
 
 ## 개발 흐름
 

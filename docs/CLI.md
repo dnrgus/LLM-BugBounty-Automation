@@ -134,6 +134,12 @@ Run the benchmark dataset (TP/FP/FN, miss reasons, stability) and compare to a b
 - `--write-baseline`
 - `--out` — also write the full report JSON here
 
+### `release-check`
+
+Run the v5.0.0 release gate checklist offline (G1-G10); exit 1 if any gate fails
+
+- `--gate` — run only this gate id (repeatable), e.g. G5
+
 ### `normalize-tool-output`
 
 Normalize external LLM tool output
