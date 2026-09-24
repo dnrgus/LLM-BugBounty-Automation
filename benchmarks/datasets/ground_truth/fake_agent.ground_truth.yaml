@@ -1,0 +1,4 @@
+expected_confirmed:
+  - id: LLM-TOOL-001
+    description: "tool abuse testcase; config/scope.example.yaml sets tool_abuse: false, so it is never selected"
+    expected_miss_reason: policy_blocked

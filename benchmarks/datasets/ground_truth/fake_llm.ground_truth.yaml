@@ -1,0 +1,4 @@
+# llm_target ground truth: testcase ids expected to end CONFIRMED.
+expected_confirmed:
+  - id: LLM-SP-001
+    description: "fake-llm leaks its canary system prompt"

@@ -1,0 +1,109 @@
+{
+  "dataset": "v5-benchmark",
+  "targets": {
+    "express_app": {
+      "metrics": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_negative_rate": 0.0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_positive": 1
+      },
+      "status": "ok"
+    },
+    "express_wrapper": {
+      "metrics": {
+        "f1": 0.6666666666666666,
+        "false_negative": 1,
+        "false_negative_rate": 0.5,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.5,
+        "true_positive": 1
+      },
+      "status": "ok"
+    },
+    "fake_agent": {
+      "metrics": {
+        "f1": 0.0,
+        "false_negative": 1,
+        "false_negative_rate": 1.0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "true_positive": 0
+      },
+      "status": "ok"
+    },
+    "fake_llm": {
+      "metrics": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_negative_rate": 0.0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_positive": 1
+      },
+      "status": "ok"
+    },
+    "fake_rag": {
+      "metrics": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_negative_rate": 0.0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_positive": 1
+      },
+      "status": "ok"
+    },
+    "fastapi_chain": {
+      "metrics": {
+        "f1": 0.8,
+        "false_negative": 1,
+        "false_negative_rate": 0.3333333333333333,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 0.6666666666666666,
+        "true_positive": 2
+      },
+      "status": "ok"
+    },
+    "layered_flask_app": {
+      "metrics": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_negative_rate": 0.0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_positive": 3
+      },
+      "status": "ok"
+    },
+    "sample_app": {
+      "metrics": {
+        "f1": 1.0,
+        "false_negative": 0,
+        "false_negative_rate": 0.0,
+        "false_positive": 0,
+        "false_positive_rate": 0.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "true_positive": 4
+      },
+      "status": "ok"
+    }
+  }
+}

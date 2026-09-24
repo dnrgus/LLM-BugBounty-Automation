@@ -42,6 +42,9 @@ jobs:
       - name: Ground-truth quality gate
         run: python main.py quality-gate
 
+      - name: Benchmark dataset regression gate (v4.7 WP-07)
+        run: python main.py benchmark --baseline benchmarks/baselines/baseline.json --timeout 120 --out runs/benchmark-report.json
+
       - name: Sample run smoke (fake targets)
         run: |
           python main.py sample-run

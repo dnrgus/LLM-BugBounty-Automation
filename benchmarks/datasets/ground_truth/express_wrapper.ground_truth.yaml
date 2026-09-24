@@ -1,0 +1,17 @@
+fixture_path: tests/fixtures/source/express_wrapper
+findings:
+  - id: express-wrapper-direct-command
+    asset_type: dataflow
+    file: tests/fixtures/source/express_wrapper/app.js
+    line: 17
+    sink_type: os_command
+    severity: critical
+    description: "req.query.target -> child_process.exec in the same handler"
+  - id: express-wrapper-helper-command
+    asset_type: dataflow
+    file: tests/fixtures/source/express_wrapper/app.js
+    line: 7
+    sink_type: os_command
+    severity: critical
+    description: "req.query.name -> runReport() -> child_process.exec; JS/TS cross-function tracking not implemented (WP-05 skipped)"
+    expected_miss_reason: dataflow_cut
