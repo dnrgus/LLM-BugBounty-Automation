@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 import yaml
 
+from core.contract import SCHEMA_VERSIONS
 from benchmarks.ground_truth import load_ground_truth
 from benchmarks.matcher import match_findings_to_ground_truth
 from benchmarks.metrics import compute_accuracy_metrics
@@ -23,7 +24,7 @@ from benchmarks.metrics import compute_accuracy_metrics
 # stability (error/timeout/crash) as separate numbers. One failing target
 # never stops the rest.
 
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = SCHEMA_VERSIONS["benchmark_dataset"]
 MISS_REASONS = (
     "unsupported_framework",
     "dataflow_cut",

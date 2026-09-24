@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core.contract import SCHEMA_VERSIONS
 from storage.artifacts import sha256_file, write_json_artifact
 from storage.sqlite import SQLiteStore
 
@@ -51,6 +52,7 @@ class RunManifest:
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema_version": SCHEMA_VERSIONS["evidence_manifest"],
             "run_id": self.run_id,
             "entry_count": len(self.entries),
             "any_tamper_detected": self.any_tamper_detected,
