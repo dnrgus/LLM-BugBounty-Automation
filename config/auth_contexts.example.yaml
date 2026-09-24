@@ -1,0 +1,13 @@
+# v4.5 WP-02: tester-owned test accounts for the read-only object access
+# comparison. Credentials are referenced by environment variable only --
+# literal header values are rejected. Declare only objects your own test
+# accounts created.
+accounts:
+  - id: user_a
+    role: user
+    headers: {Authorization: "Bearer ${USER_A_TOKEN}"}
+    owned_objects: {note_id: "101"}
+  - id: user_b
+    role: user
+    headers: {Authorization: "Bearer ${USER_B_TOKEN}"}
+    owned_objects: {note_id: "202"}
