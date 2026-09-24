@@ -1,0 +1,30 @@
+# P4.6 WP-04 (v5.0 plan 6.4): multi-file Flask app whose sinks are only
+# reachable through service/repository helpers. The per-file tracer finds
+# none of these; the interprocedural pass must find exactly these three.
+# /health passes a constant and must NOT be reported.
+
+fixture_path: tests/fixtures/source/layered_flask_app
+findings:
+  - id: layered-sql-injection-2hop
+    asset_type: dataflow
+    file: tests/fixtures/source/layered_flask_app/app/db/repo.py
+    line: 6
+    sink_type: sql_injection
+    severity: high
+    description: "request.args q -> find_notes -> _build_filter (returned) -> run_query -> conn.execute string concat"
+
+  - id: layered-template-injection-1hop
+    asset_type: dataflow
+    file: tests/fixtures/source/layered_flask_app/app/services/notes.py
+    line: 16
+    sink_type: template_injection
+    severity: high
+    description: "request.args body -> render_note -> render_template_string"
+
+  - id: layered-command-injection-2hop
+    asset_type: dataflow
+    file: tests/fixtures/source/layered_flask_app/app/services/reports.py
+    line: 5
+    sink_type: os_command
+    severity: critical
+    description: "request.json name -> reports.export (module alias) -> _archive -> subprocess.run(shell=True)"

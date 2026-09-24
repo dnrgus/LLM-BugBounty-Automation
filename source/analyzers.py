@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 
 from attack_surface.models import AttackSurfaceItem
 from source.ai.python import find_ai_capability_hints
@@ -10,6 +12,8 @@ from source.contract import LanguageSourceAnalyzer, get_language_analyzer, regis
 from source.dataflow.javascript import trace_dataflow as trace_dataflow_js
 from source.dataflow.python import trace_dataflow
 from source.ingestion import SourceFile
+from source.interprocedural.python import trace_interprocedural
+from source.sinks.python import sink_family
 
 # P4.2-A: python's dataflow/auth backends, registered through the same
 # contract a future language's backend (P4.2-D) plugs into -- behavior
@@ -55,10 +59,15 @@ _SECRET_PATTERNS = [
     ("private_key_block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
 ]
 
-def analyze_files(files: list[SourceFile], routes: list[AttackSurfaceItem] | None = None) -> list[AttackSurfaceItem]:
+def analyze_files(
+    files: list[SourceFile],
+    routes: list[AttackSurfaceItem] | None = None,
+    stats_out: dict[str, object] | None = None,
+) -> list[AttackSurfaceItem]:
     """`routes` (extract_routes' own output) is optional but, when given,
     lets P3.2-4's auth-guard check know which functions are actually
-    route handlers -- see _find_auth_guards.
+    route handlers -- see _find_auth_guards. `stats_out`, if given,
+    receives the P4.6 interprocedural pass's stats (caps hit etc.).
     """
     route_handlers_by_file: dict[str, set[str]] = {}
     for route_item in routes or []:
@@ -79,7 +88,100 @@ def analyze_files(files: list[SourceFile], routes: list[AttackSurfaceItem] | Non
         items.extend(_find_llm_integration(source_file, text))
         items.extend(_find_dataflow_edges(source_file, text))
         items.extend(_find_auth_guards(source_file, text, route_handlers_by_file.get(str(source_file.path), set())))
+    items.extend(_find_interprocedural_edges(files, routes or [], items, stats_out))
     return items
+
+
+def _find_interprocedural_edges(
+    files: list[SourceFile],
+    routes: list[AttackSurfaceItem],
+    items: list[AttackSurfaceItem],
+    stats_out: dict[str, object] | None,
+) -> list[AttackSurfaceItem]:
+    """P4.6 WP-04: route -> helper/service -> sink chains across Python
+    files (source/interprocedural/python.py). Only edges the per-file
+    tracer didn't already report are added, each carrying its call
+    path, the route it starts at, and that route's auth-guard hint."""
+    python_files = [source_file.path for source_file in files if source_file.language == "python"]
+    if not python_files:
+        return []
+    root = Path(os.path.commonpath([str(path.resolve().parent) for path in python_files]))
+    # Import root = the directory *containing* the top-level package, so
+    # `from app.services import x` resolves when every file lives under app/.
+    while (root / "__init__.py").exists() and root.parent != root:
+        root = root.parent
+    edges, stats = trace_interprocedural(root, python_files)
+    if stats_out is not None:
+        stats_out.update(stats.to_dict())
+
+    already = {
+        (str(Path(str(item.metadata.get("file"))).resolve()), item.metadata.get("line"), item.metadata.get("sink_type"))
+        for item in items
+        if item.asset_type == "dataflow"
+    }
+    route_by_handler = {
+        (str(Path(str(route.metadata.get("file"))).resolve()), route.metadata.get("handler")): route
+        for route in routes
+        if route.metadata.get("handler")
+    }
+    auth_by_handler = {
+        (str(Path(str(item.metadata.get("file"))).resolve()), item.metadata.get("handler")): item
+        for item in items
+        if item.asset_type == "auth" and item.metadata.get("handler")
+    }
+
+    found: list[AttackSurfaceItem] = []
+    for edge in edges:
+        key = (str(Path(edge.file).resolve()), edge.line, edge.sink)
+        if key in already:
+            continue
+        already.add(key)
+        entry_function = edge.entry.split(":", 1)[1]
+        entry_file = next(
+            (str(path.resolve()) for path in python_files if _module_matches(root, path, edge.entry.split(":", 1)[0])), None
+        )
+        route = route_by_handler.get((entry_file, entry_function)) if entry_file else None
+        auth = auth_by_handler.get((entry_file, entry_function)) if entry_file else None
+        metadata: dict[str, object] = {
+            "sink_type": edge.sink,
+            "sink_family": edge.sink_family,
+            "source": edge.source,
+            "file": edge.file,
+            "line": edge.line,
+            "entry": edge.entry,
+            "call_path": list(edge.call_path),
+            "hops": edge.hops,
+            "analysis": "interprocedural",
+        }
+        if route is not None:
+            metadata["route"] = f"{route.metadata.get('method')} {route.location}"
+        if auth is not None:
+            metadata["auth_guard_detected"] = bool(auth.metadata.get("detected"))
+            metadata["auth_guards"] = list(auth.metadata.get("guard_names", []))
+        found.append(
+            AttackSurfaceItem(
+                source_type="source",
+                asset_type="dataflow",
+                location=f"{edge.file}:{edge.line}",
+                metadata=metadata,
+                # Each extra hop is one more resolution step that could be
+                # wrong, so confidence decays slightly with chain length.
+                confidence=round(max(0.6, 0.85 - 0.05 * edge.hops), 2),
+                evidence_refs=[f"{edge.file}:{edge.line}", *[f"call:{step}" for step in edge.call_path]],
+            )
+        )
+    return found
+
+
+def _module_matches(root: Path, path: Path, module: str) -> bool:
+    try:
+        relative = path.resolve().relative_to(root.resolve()).with_suffix("")
+    except ValueError:
+        return False
+    parts = list(relative.parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts) == module
 
 
 def _line_of(text: str, offset: int) -> int:
@@ -167,6 +269,7 @@ def _find_dataflow_edges(source_file: SourceFile, text: str) -> list[AttackSurfa
                 location=f"{source_file.path}:{edge.line}",
                 metadata={
                     "sink_type": edge.sink,
+                    "sink_family": sink_family(edge.sink),
                     "source": edge.source,
                     "file": edge.file,
                     "line": edge.line,
