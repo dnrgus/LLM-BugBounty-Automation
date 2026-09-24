@@ -82,13 +82,27 @@ def analyze_files(
             text = source_file.path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
             continue
-        items.extend(_find_inputs(source_file, text))
-        items.extend(_find_sinks(source_file, text))
-        items.extend(_find_secrets(source_file, text))
-        items.extend(_find_llm_integration(source_file, text))
-        items.extend(_find_dataflow_edges(source_file, text))
-        items.extend(_find_auth_guards(source_file, text, route_handlers_by_file.get(str(source_file.path), set())))
-    items.extend(_find_interprocedural_edges(files, routes or [], items, stats_out))
+        # P4.7 WP-08: one pathological file (deep nesting, huge literal)
+        # must never abort the whole audit -- its partial results are
+        # dropped and the failure is recorded instead.
+        try:
+            file_items: list[AttackSurfaceItem] = []
+            file_items.extend(_find_inputs(source_file, text))
+            file_items.extend(_find_sinks(source_file, text))
+            file_items.extend(_find_secrets(source_file, text))
+            file_items.extend(_find_llm_integration(source_file, text))
+            file_items.extend(_find_dataflow_edges(source_file, text))
+            file_items.extend(_find_auth_guards(source_file, text, route_handlers_by_file.get(str(source_file.path), set())))
+        except (RecursionError, MemoryError) as exc:
+            if stats_out is not None:
+                stats_out.setdefault("file_errors", []).append({"file": str(source_file.path), "error": type(exc).__name__})
+            continue
+        items.extend(file_items)
+    try:
+        items.extend(_find_interprocedural_edges(files, routes or [], items, stats_out))
+    except (RecursionError, MemoryError) as exc:
+        if stats_out is not None:
+            stats_out.setdefault("truncated", []).append(f"interprocedural_{type(exc).__name__}")
     return items
 
 

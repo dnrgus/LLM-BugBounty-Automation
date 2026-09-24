@@ -30,6 +30,9 @@ jobs:
       - name: Lint (bug-catching rules only)
         run: ruff check .
 
+      - name: P0/P1 regression suite (v4.7 WP-08)
+        run: pytest -q -m "p0 or p1" tests/regression
+
       - name: Unit + integration tests
         run: pytest -q
 

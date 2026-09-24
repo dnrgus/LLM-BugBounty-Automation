@@ -38,7 +38,7 @@ def trace_dataflow(path: Path, text: str) -> list[DataEdge]:
     """
     try:
         tree = ast.parse(text, filename=str(path))
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return []
 
     functions: dict[str, _FunctionNode] = {

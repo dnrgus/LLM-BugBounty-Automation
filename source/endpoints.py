@@ -330,7 +330,7 @@ class _SourceCache:
             text = self.text(file)
             try:
                 self._tree[file] = ast.parse(text) if text is not None else None
-            except (SyntaxError, ValueError):
+            except (SyntaxError, ValueError, RecursionError, MemoryError):
                 self._tree[file] = None
         return self._tree[file]
 
