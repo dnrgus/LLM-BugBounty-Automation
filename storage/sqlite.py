@@ -513,6 +513,13 @@ class SQLiteStore:
                 data,
             )
 
+    def list_reproductions(self, finding_id: str) -> list[sqlite3.Row]:
+        """P4.5 WP-03: every recorded reproduction for one finding, oldest first."""
+        with self.connect() as conn:
+            return conn.execute(
+                "select * from reproductions where finding_id = ? order by rowid", (finding_id,)
+            ).fetchall()
+
     def record_evidence(self, run_id: str, kind: str, path: Path, raw_path: Path | None = None) -> Evidence:
         evidence = Evidence(
             run_id=run_id,

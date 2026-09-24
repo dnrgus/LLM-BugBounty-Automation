@@ -88,7 +88,9 @@ LIMITATIONS_BY_VALIDATOR_TYPE["object_access"] = (
 _SEVERITY_BY_VALIDATOR_TYPE["object_access"] = "high"
 
 
-def finding_from_object_access(run_id: str, result: object, evidence_ref: str) -> Finding:
+def finding_from_object_access(
+    run_id: str, result: object, evidence_ref: str, replay: dict[str, object] | None = None
+) -> Finding:
     """P4.5 WP-02: ObjectAccessResult -> Finding. needs_review is kept as
     FindingStatus.NEEDS_REVIEW (never promoted to confirmed)."""
     data = result.to_dict()  # type: ignore[attr-defined]
@@ -108,6 +110,10 @@ def finding_from_object_access(run_id: str, result: object, evidence_ref: str) -
             "object_param": data["object_param"],
             "owner_context": data["owner_context"],
             "other_context": data["other_context"],
+            # WP-03: what `reproduce <id>` needs to re-run the same check
+            # (endpoint spec, base url, compared key fields) -- never
+            # credentials, which are re-read from --auth-contexts.
+            **(replay or {}),
         },
         origin=["static", "dynamic"],
         validation_status=str(data["verdict"]),

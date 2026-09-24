@@ -96,8 +96,7 @@ def _needs_review(spec: EndpointSpec, reason: str, object_param: str | None = No
     return ObjectAccessResult(spec.id, spec.method, object_param, None, None, VERDICT_NEEDS_REVIEW, reason)
 
 
-def _fill_path(spec: EndpointSpec, param: str, value: str) -> str:
-    path = spec.path
+def fill_path_param(path: str, param: str, value: str) -> str:
     for token in (f"<int:{param}>", f"<string:{param}>", f"<{param}>", f"{{{param}}}", f":{param}", f"[{param}]"):
         path = path.replace(token, value)
     return path
@@ -141,7 +140,7 @@ async def validate_object_access(
             spec, f"needs two usable tester accounts that each declare an owned '{param}'; found {len(accounts)}", param
         )
     owner, other = accounts[0], accounts[1]
-    url = base_url.rstrip("/") + _fill_path(spec, param, owner.owned_objects[param])
+    url = base_url.rstrip("/") + fill_path_param(spec.path, param, owner.owned_objects[param])
 
     decision = policy.validate_request(url, spec.method)
     if not decision.allowed:

@@ -55,6 +55,16 @@ from targets.factory import create_target
 from testcase.coverage import build_coverage_matrix, coverage_summary
 from testcase.loader import load_testcases
 from testcase.selector import select_executable_testcases
+from validation.auth_contexts import load_auth_contexts
+from validation.workflow import (
+    build_scan_artifact,
+    is_replayable_validation_finding,
+    load_scan_artifact,
+    reproduce_validation_finding,
+    run_validate,
+    write_artifact,
+    write_validation_report,
+)
 
 
 DEFAULT_SCOPE = Path("config/scope.example.yaml")
@@ -260,8 +270,16 @@ def cmd_adaptive_run(args: argparse.Namespace) -> int:
 
 def cmd_reproduce(args: argparse.Namespace) -> int:
     policy = PolicyEngine.from_yaml(args.scope)
-    testcases = load_testcases(args.testcases)
     store = SQLiteStore(args.db)
+    # P4.5 WP-03: a `validate`-produced object access finding replays its
+    # own stored spec instead of a testcase.
+    finding = store.get_finding(args.finding_id)
+    if finding is not None and is_replayable_validation_finding(finding):
+        contexts = load_auth_contexts(args.auth_contexts) if args.auth_contexts else None
+        result = asyncio.run(reproduce_validation_finding(finding, policy, store, contexts, attempts=args.attempts))
+        print(_json(result))
+        return 0
+    testcases = load_testcases(args.testcases)
     result = asyncio.run(
         run_reproduce_finding(
             policy,
@@ -418,6 +436,26 @@ def cmd_recon(args: argparse.Namespace) -> int:
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
+    if args.source and not args.url:
+        # P4.5 WP-03: SOURCE-only `scan --source <path>` writes the common
+        # scan artifact (inventory + candidates) that `validate` reads.
+        artifact = build_scan_artifact(args.source, captured_requests=args.captured_requests)
+        artifact_path = write_artifact(args.artifact or Path("runs/artifacts") / f"{artifact['id']}.json", artifact)
+        inventory = artifact["endpoint_inventory"]
+        print(
+            _json(
+                {
+                    "mode": "source",
+                    "artifact": str(artifact_path),
+                    "artifact_id": artifact["id"],
+                    "candidates": len(artifact["items"]),
+                    "endpoints": len(inventory),
+                    "endpoints_by_risk": _count_by(inventory, "risk"),
+                }
+            )
+        )
+        return 0
+
     profile = load_profile(args.profile, args.pipeline_config)
     policy = PolicyEngine.from_yaml(args.scope)
     testcases = load_testcases(args.testcases)
@@ -492,6 +530,30 @@ def cmd_scan(args: argparse.Namespace) -> int:
         )
     )
     print(_json(result))
+    return 0
+
+
+def _count_by(entries: object, key: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for entry in entries:  # type: ignore[union-attr]
+        counts[str(entry[key])] = counts.get(str(entry[key]), 0) + 1
+    return counts
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    artifact = load_scan_artifact(args.artifact)
+    policy = PolicyEngine.from_yaml(args.scope)
+    store = SQLiteStore(args.db)
+    contexts = load_auth_contexts(args.auth_contexts) if args.auth_contexts else None
+    result = asyncio.run(run_validate(artifact, args.base_url, policy, store, auth_contexts=contexts, key_fields=args.key_field))
+    print(_json(result))
+    return 0
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    store = SQLiteStore(args.db)
+    store.initialize()
+    print(_json(write_validation_report(store, args.run_id, args.out)))
     return 0
 
 
@@ -589,7 +651,31 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="If the finding still reproduces, also generate a minimal PoC",
     )
+    reproduce.add_argument(
+        "--auth-contexts", type=Path, default=None,
+        help="object access findings from `validate`: tester account YAML (see config/auth_contexts.example.yaml)",
+    )
+    reproduce.add_argument("--attempts", type=int, default=3, help="object access findings: number of re-runs")
     reproduce.set_defaults(func=cmd_reproduce)
+
+    validate_cmd = sub.add_parser(
+        "validate",
+        help="Run safe validators over a `scan --source` artifact (scope + method policy gate, object access "
+        "comparison with tester-owned accounts)",
+    )
+    validate_cmd.add_argument("--artifact", type=Path, required=True)
+    validate_cmd.add_argument("--base-url", required=True, help="Base URL of the authorized target")
+    validate_cmd.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    validate_cmd.add_argument("--db", type=Path, default=Path("runs/validate.sqlite"))
+    validate_cmd.add_argument("--auth-contexts", type=Path, default=None)
+    validate_cmd.add_argument("--key-field", action="append", default=None, help="response field compared (as a hash)")
+    validate_cmd.set_defaults(func=cmd_validate)
+
+    report_cmd = sub.add_parser("report", help="Write per-finding reports for a `validate` run")
+    report_cmd.add_argument("--run-id", required=True)
+    report_cmd.add_argument("--db", type=Path, default=Path("runs/validate.sqlite"))
+    report_cmd.add_argument("--out", type=Path, default=Path("reports/validation"))
+    report_cmd.set_defaults(func=cmd_report)
 
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
     judge_benchmark.add_argument("--benchmark", type=Path, default=DEFAULT_JUDGE_BENCHMARK)
@@ -746,7 +832,13 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument(
         "--source", type=Path, default=None,
         help="HYBRID MODE: source tree to audit alongside the url (SOURCE + LIVE correlation and "
-        "dynamic validation, P3.3-4). Requires url; ignored if url is omitted.",
+        "dynamic validation, P3.3-4). Without url: SOURCE-only scan that writes a scan artifact for "
+        "`validate` (P4.5 WP-03).",
+    )
+    scan.add_argument("--artifact", type=Path, default=None, help="SOURCE-only scan: artifact output path")
+    scan.add_argument(
+        "--captured-requests", type=Path, default=None,
+        help="SOURCE-only scan: HAR or JSON list of real requests; overrides inferred request shape",
     )
     scan.add_argument(
         "--auth-context", action="store_true",
