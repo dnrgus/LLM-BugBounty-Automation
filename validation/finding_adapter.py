@@ -72,3 +72,43 @@ def finding_from_validation_result(
         validation_task_ids=[task.id],
         validation_status=result.status.value,
     )
+
+
+_OBJECT_ACCESS_STATUS = {
+    "confirmed": FindingStatus.CONFIRMED,
+    "rejected": FindingStatus.REJECTED,
+    "needs_review": FindingStatus.NEEDS_REVIEW,
+}
+
+LIMITATIONS_BY_VALIDATOR_TYPE["object_access"] = (
+    "Compares one read-only request for a tester-owned object sent as its owner and as a second tester-owned "
+    "account; confirmed only when the second account received matching key-field hashes. Without two usable "
+    "accounts the result stays needs_review and nothing is sent."
+)
+_SEVERITY_BY_VALIDATOR_TYPE["object_access"] = "high"
+
+
+def finding_from_object_access(run_id: str, result: object, evidence_ref: str) -> Finding:
+    """P4.5 WP-02: ObjectAccessResult -> Finding. needs_review is kept as
+    FindingStatus.NEEDS_REVIEW (never promoted to confirmed)."""
+    data = result.to_dict()  # type: ignore[attr-defined]
+    return Finding(
+        run_id=run_id,
+        testcase_id=str(data["endpoint_id"]),
+        title=f"object access comparison: {data['method']} {data.get('requested_url') or data['endpoint_id']}",
+        category="object_access",
+        status=_OBJECT_ACCESS_STATUS[str(data["verdict"])],
+        confidence=0.9 if data["verdict"] == "confirmed" else 0.5,
+        severity=_SEVERITY_BY_VALIDATOR_TYPE["object_access"],
+        evidence_ref=evidence_ref,
+        reproduction_spec={
+            "type": "validation",
+            "validator_type": "object_access",
+            "endpoint_id": data["endpoint_id"],
+            "object_param": data["object_param"],
+            "owner_context": data["owner_context"],
+            "other_context": data["other_context"],
+        },
+        origin=["static", "dynamic"],
+        validation_status=str(data["verdict"]),
+    )

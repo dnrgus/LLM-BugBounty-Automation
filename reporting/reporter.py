@@ -12,6 +12,7 @@ _STATUS_LABELS = {
     "unstable": "불안정",
     "rejected": "기각됨",
     "candidate": "후보",
+    "needs_review": "검토 필요",
 }
 
 # P4.1-E (roadmap v4.1.0 Dynamic Validation Expansion): what a CONFIRMED

@@ -20,6 +20,10 @@ class FindingStatus(str, Enum):
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
     UNSTABLE = "unstable"
+    # P4.5 WP-02 (v5.0 plan 5.2/6.3): evidence exists but is not strong
+    # enough to confirm -- e.g. a comparison run without two distinct
+    # test accounts, or conflicting judges. Additive; never auto-promoted.
+    NEEDS_REVIEW = "needs_review"
 
 
 @dataclass(frozen=True)
