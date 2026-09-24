@@ -552,6 +552,28 @@ python main.py report --run-id <validate run_id>
 - body 추론은 handler 본문 기반 — JS/TS는 route 호출부터 다음 route까지의 구간 휴리스틱, 다른 파일에서 import한 handler는 미해석(WP-05 범위)
 - `scan <url>`(LIVE/HYBRID) 경로는 변경 없음; `--source`만 단독으로 줄 때의 동작만 새 artifact 모드로 바뀜(이전엔 `--source`가 무시되고 fixture 파이프라인이 실행됐음)
 
+## v4.6.0 Release Gate
+
+"분석 정확도와 Judge 보강" 게이트입니다 (v5.0 개발 계획서 WP-04, WP-06).
+
+```bash
+pytest   # 667 passed
+ruff check .
+python main.py quality-gate   # 3개 fixture, 8/8 TP, FP 0
+python main.py sample-run --semantic-judge-config config/semantic_judge.example.yaml   # 선택 사항
+```
+
+### v4.6.0 완료 범위
+
+- **Python interprocedural dataflow (WP-04)**: `source/interprocedural/python.py` — 프로젝트 전체 call graph(같은 파일 함수, `from x import f`, module alias), 함수별 taint summary(param→sink, param→return)로 route → service → sink N-hop 추적. FastAPI route param은 source(Depends 제외). `max_depth`/`max_nodes`/`time_budget_s` cap, 초과 시 graceful 중단 + `audit` 출력의 `interprocedural` 통계. 각 chain에 `call_path`/`hops`/`route`/auth guard 정보 연결, sink family 표준화(sql/command/template/url_fetch/file/deserialization/llm_prompt). 다중 파일 fixture `layered_flask_app`을 ground truth에 고정
+- **Semantic judge 보조 (WP-06)**: `judges/semantic.py` — 기존 deterministic judge가 1차, semantic judge는 2차(opt-in). 두 판정 충돌, 또는 동의하더라도 confidence가 기준 미만이면 `needs_review`. semantic 단독으로는 절대 confirmed가 되지 않음. evidence에 `judge_layers`(deterministic / semantic / final) 3층과 model·prompt version·prompt SHA-256 기록. judge 호출 실패 시 abstain(실행 중단 없음)
+
+### v4.6.0 알려진 제한사항 (Known Limitations)
+
+- **WP-05(JS/TS 함수 간 dataflow)는 이번 버전에서 구현하지 않음**: JS/TS는 기존과 같이 함수 내부(single-scope) 추적만 지원. Express middleware → handler → service, Next.js server action, NestJS controller → service 흐름은 미지원
+- Python interprocedural: class method 호출(`self.repo.find(x)`)은 receiver 타입 추론 없이 명시적으로 끊김(추측하지 않음), sanitizer 인식 없음
+- Semantic judge는 기본 비활성, `sample-run` 경로에만 연결됨
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -571,6 +593,7 @@ python main.py report --run-id <validate run_id>
 - `v4.3.0`: Runtime Coverage Expansion (EventStream contract, HTTP SSE target, WebSocket/Browser event 통합, Judge event-compatibility)
 - `v4.4.0`: Accuracy & Benchmark (ground truth schema, metric engine, matching/scoring, CI quality gate, confidence calibration) — v4.1.0-v4.4.0 로드맵 완결
 - `v4.5.0`: API/Auth 검증 연결 (HTTP method/body inventory + 상태 변경 정책 gate, tester-owned auth context 비교, scan -> validate -> reproduce -> report CLI)
+- `v4.6.0`: 분석 정확도와 Judge 보강 (Python interprocedural dataflow + caps, semantic judge 보조 layer / needs_review) — JS/TS 함수 간 추적은 제한사항
 
 ## 개발 흐름
 
