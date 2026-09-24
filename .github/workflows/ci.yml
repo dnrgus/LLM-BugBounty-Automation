@@ -61,6 +61,9 @@ jobs:
           sleep 1
           python main.py scan http://127.0.0.1:8123/ --scope config/scope.ci.yaml
           python main.py scan http://127.0.0.1:8123/ --source tests/fixtures/source/sample_app --scope config/scope.ci.yaml
+          python main.py scan --source tests/fixtures/source/rest_api_app --artifact runs/artifacts/ci_scan.json
+          python main.py validate --artifact runs/artifacts/ci_scan.json --base-url http://127.0.0.1:8123 --scope config/scope.ci.yaml --db runs/ci_validate.sqlite > runs/ci_validate.json
+          python main.py report --run-id "$(python -c 'import json;print(json.load(open("runs/ci_validate.json"))["run_id"])')" --db runs/ci_validate.sqlite --out reports/ci_validation
           kill "$SERVER_PID" || true
 
       - name: Confirm no secrets or raw evidence are staged

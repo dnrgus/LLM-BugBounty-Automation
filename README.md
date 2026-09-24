@@ -522,6 +522,36 @@ v4.3.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - **quality-gate는 SOURCE MODE 정적 결과만 검증**: 실제 동적 Finding의 reproduction-rate/live 정확도는 검증하지 않음 — 라이브 대상이 필요해서 CI의 결정론적/네트워크 없는 실행 원칙과 맞지 않음
 - v4.3.0 절에 있던 항목들 계속 유효
 
+## v4.5.0 Release Gate
+
+"API/Auth 검증 연결" 게이트입니다 — v5.0 개발 계획서의 첫 버전(WP-01~WP-03). 후보는 찾지만 실제 검증 경로가 끊기던 문제를 CLI 한 흐름(`scan -> validate -> reproduce -> report`)으로 연결하는 것이 완성 기준입니다.
+
+```bash
+pytest   # 640 passed
+ruff check .
+python main.py scan --source tests/fixtures/source/rest_api_app --artifact runs/artifacts/scan.json
+python main.py validate --artifact runs/artifacts/scan.json --base-url https://<허가된 대상> \
+    --auth-contexts config/my-auth.yaml --key-field owner
+python main.py reproduce <finding-id> --auth-contexts config/my-auth.yaml --attempts 3
+python main.py report --run-id <validate run_id>
+```
+
+### v4.5.0 완료 범위
+
+- **HTTP method/body 모델 (WP-01)**: `source/endpoints.py` endpoint inventory — route x 실제 method(POST/PUT/PATCH/DELETE 포함), path/query param, body format(json/form/multipart)과 field 추론(Flask, FastAPI pydantic, Express). 캡처 요청(HAR/JSON)이 있으면 추론보다 우선. `audit` 출력에 `endpoint_inventory` 추가
+- **상태 변경 요청 정책 gate (WP-01)**: `PolicyEngine.decide_method` — read-only는 실행, 상태 변경은 기본 `dry_run`(계획/기록만, 전송 안 함) / `review_required` / `allowed`(`testing.state_changing_requests`). DELETE는 `destructive_actions: true`도 필요하고 blocked_actions의 `delete`면 차단. 상태 변경 body는 캡처/사용자 제공 예시 없이는 절대 합성하지 않음
+- **Auth context / object 비교 (WP-02)**: 테스터 본인 소유 테스트 계정만 YAML로 선언(`config/auth_contexts.example.yaml`), 자격증명은 `${ENV}` 참조만 허용(리터럴 거부, evidence/report에 기록 안 함). read-only 요청만, 테스터가 선언한 자기 객체 id만 요청. 응답은 status/구조/key field **hash**만 fingerprint로 저장. 계정 2개 미만이면 요청 없이 `needs_review` + 이유 기록
+- **`FindingStatus.NEEDS_REVIEW`** 추가(additive)
+- **Validator CLI 연결 (WP-03)**: `scan --source`(url 없이) → scan artifact, `validate`, `reproduce <id>`(object access finding 재실행/횟수/결과 저장), `report`(finding별 md/json: 상태, 판정 근거, evidence 경로+SHA-256, 재현 기록, 재현 절차, 제한사항)
+- **CI**: validate/report smoke 추가
+
+### v4.5.0 알려진 제한사항 (Known Limitations)
+
+- 상태 변경 method의 object 비교는 자동화하지 않음(항상 `needs_review`)
+- path param 값은 테스터가 `owned_objects`로 선언한 값만 사용 — 선언이 없으면 해당 요청은 계획만 기록
+- body 추론은 handler 본문 기반 — JS/TS는 route 호출부터 다음 route까지의 구간 휴리스틱, 다른 파일에서 import한 handler는 미해석(WP-05 범위)
+- `scan <url>`(LIVE/HYBRID) 경로는 변경 없음; `--source`만 단독으로 줄 때의 동작만 새 artifact 모드로 바뀜(이전엔 `--source`가 무시되고 fixture 파이프라인이 실행됐음)
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -540,6 +570,7 @@ v4.3.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 - `v4.2.0`: Source Intelligence Expansion (LanguageSourceAnalyzer contract, NestJS 라우트, JS/TS dataflow/auth/AI SDK 탐지)
 - `v4.3.0`: Runtime Coverage Expansion (EventStream contract, HTTP SSE target, WebSocket/Browser event 통합, Judge event-compatibility)
 - `v4.4.0`: Accuracy & Benchmark (ground truth schema, metric engine, matching/scoring, CI quality gate, confidence calibration) — v4.1.0-v4.4.0 로드맵 완결
+- `v4.5.0`: API/Auth 검증 연결 (HTTP method/body inventory + 상태 변경 정책 gate, tester-owned auth context 비교, scan -> validate -> reproduce -> report CLI)
 
 ## 개발 흐름
 

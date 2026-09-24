@@ -17,6 +17,8 @@ evidence/raw/
 evidence/sanitized/
 reports/private/
 reports/shareable/
+reports/validation/
+reports/ci_validation/
 *.sqlite
 *.sqlite3
 tool_versions.lock.yaml
