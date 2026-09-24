@@ -1,0 +1,7 @@
+# v4.6 WP-06: opt-in secondary semantic judge. The deterministic judges stay
+# primary; disagreement or low confidence -> needs_review, never confirmed.
+provider: openai_compatible
+base_url: https://api.openai.com/v1
+model: gpt-4o-mini
+api_key_env: OPENAI_API_KEY
+min_confidence: 0.7

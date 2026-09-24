@@ -35,6 +35,7 @@ from executor.runner import Executor
 from findings.dedup import base_testcase_id, cluster_findings
 from findings.report import write_cluster_report
 from judges.ensemble import JudgeEnsemble
+from judges.semantic import FINAL_NEEDS_REVIEW, SemanticJudgeConfig
 from live.auto_profile import auto_profile_candidates
 from live.classify import classify_items
 from live.discovery import discover_target
@@ -71,8 +72,12 @@ async def run_sample_pipeline(
     target_config: Path | str | None = None,
     resume_run_id: str | None = None,
     cancellation: CancellationToken | None = None,
+    semantic_judge: SemanticJudgeConfig | None = None,
 ) -> dict[str, object]:
-    """resume_run_id (P3.4-1, roadmap v3.4.0 Production Hardening): opt-in
+    """semantic_judge (P4.6 WP-06): opt-in secondary judge layer; see
+    judges/semantic.py. None (the default) changes nothing.
+
+    resume_run_id (P3.4-1, roadmap v3.4.0 Production Hardening): opt-in
     only. When given, this call reuses that exact run_id (instead of a
     fresh one) and checks storage/run_state.py for previously completed
     testcase ids under it -- skipping them instead of re-executing
@@ -146,6 +151,7 @@ async def run_sample_pipeline(
         cancellation=cancellation,
     )
     judges = JudgeEnsemble(profile.judges) if profile is not None else JudgeEnsemble.default()
+    judges.semantic = semantic_judge
     reproducer = Reproducer(
         target=target,
         judges=judges,
@@ -343,29 +349,45 @@ async def _process_case(
         usage = response.metadata.get("usage") if isinstance(response.metadata, dict) else None
         tokens = usage.get("total_tokens") if isinstance(usage, dict) else None
         budget.commit_usage(category=case.category, tokens=int(tokens or len(response.text.split())))
+    evidence_payload: dict[str, object] = {
+        "prompt": response.prompt,
+        "response": response.text,
+        "trace_id": trace.id,
+        "judgement": judgement.reason,
+        "environment_fingerprint": run.fingerprint,
+    }
+    layered = None
+    if judges.semantic is not None:
+        # P4.6 WP-06: deterministic / semantic / final, recorded together.
+        layered = judges.layered(judgement, case, response.prompt, response.text)
+        evidence_payload["judge_layers"] = layered.to_dict()
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"),
-        Path("evidence/sanitized"),
-        f"{run.id}_{case.id}.json",
-        {
-            "prompt": response.prompt,
-            "response": response.text,
-            "trace_id": trace.id,
-            "judgement": judgement.reason,
-            "environment_fingerprint": run.fingerprint,
-        },
+        Path("evidence/raw"), Path("evidence/sanitized"), f"{run.id}_{case.id}.json", evidence_payload
     )
     evidence = store.record_evidence(run.id, "llm_response", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path)
     if not judgement.passed:
+        if layered is not None and layered.final == FINAL_NEEDS_REVIEW:
+            # Semantic-only signal: surfaced for a human, never confirmed.
+            finding = Finding(
+                run_id=run.id, testcase_id=case.id, title=case.name, category=case.category,
+                status=FindingStatus.NEEDS_REVIEW, confidence=judgement.score,
+                severity=case.severity.get("base", "medium"), evidence_ref=evidence.id,
+            )
+            store.insert_finding(finding)
+            reproduction_summary[finding.status.value] = reproduction_summary.get(finding.status.value, 0) + 1
+            return finding
         return None
 
     reproduction = await reproducer.reproduce(case, session_prefix=f"{run.id}:{case.id}")
+    status = reproduction.status
+    if layered is not None and layered.final == FINAL_NEEDS_REVIEW and status is FindingStatus.CONFIRMED:
+        status = FindingStatus.NEEDS_REVIEW
     finding = Finding(
         run_id=run.id,
         testcase_id=case.id,
         title=case.name,
         category=case.category,
-        status=reproduction.status,
+        status=status,
         confidence=judgement.score,
         severity=case.severity.get("base", "medium"),
         evidence_ref=evidence.id,

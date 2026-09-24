@@ -39,6 +39,7 @@ from findings.report import write_cluster_report
 from hybrid.correlate import correlate_source_and_live
 from judges.benchmark import load_benchmark_cases, run_benchmark
 from judges.ensemble import JudgeEnsemble
+from judges.semantic import load_semantic_judge_config
 from live.auto_profile import auto_profile_candidates
 from live.classify import classify_items
 from live.discovery import discover_target
@@ -139,6 +140,7 @@ def cmd_sample_run(args: argparse.Namespace) -> int:
             run_sample_pipeline(
                 engine, testcases, store, target_kind=args.target, target_config=args.target_config,
                 resume_run_id=args.resume_run_id, cancellation=cancellation,
+                semantic_judge=load_semantic_judge_config(args.semantic_judge_config) if args.semantic_judge_config else None,
             )
         )
     finally:
@@ -611,6 +613,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="P3.4-1: reuse this run_id and skip its already-completed testcases (from a prior "
         "invocation against the same --db) instead of a fresh run. Rejects the call if --testcases/"
         "--target/etc. changed since that run_id was started.",
+    )
+    sample.add_argument(
+        "--semantic-judge-config", type=Path, default=None,
+        help="P4.6: opt-in secondary semantic judge (see config/semantic_judge.example.yaml); conflicts or low "
+        "confidence become needs_review, never confirmed",
     )
     sample.set_defaults(func=cmd_sample_run)
 
