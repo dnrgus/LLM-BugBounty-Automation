@@ -59,3 +59,22 @@ def sink_for_call(dotted_name: str) -> str | None:
     if any(dotted_name.endswith(suffix) for suffix in _LLM_CALL_SUFFIXES):
         return "prompt_injection_sink"
     return None
+
+
+# P4.6 WP-04 (v5.0 plan 6.1): the standardized sink families every
+# language's sink_type maps into -- kept small on purpose ("sink 목록은
+# 개수를 무한히 늘리기보다 실제 benchmark에서 반복 등장하는 계열만 유지").
+_SINK_FAMILIES = {
+    "sql_injection": "sql",
+    "os_command": "command",
+    "code_execution": "command",
+    "template_injection": "template",
+    "ssrf": "url_fetch",
+    "file_access": "file",
+    "deserialization": "deserialization",
+    "prompt_injection_sink": "llm_prompt",
+}
+
+
+def sink_family(sink_type: str) -> str:
+    return _SINK_FAMILIES.get(sink_type, "other")

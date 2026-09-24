@@ -9,7 +9,9 @@ from source.ingestion import SourceIngestionResult, ingest_source
 from source.routes import extract_routes
 
 
-def collect_source_items(root: Path | str, max_files: int = 2000) -> tuple[SourceIngestionResult, list[AttackSurfaceItem]]:
+def collect_source_items(
+    root: Path | str, max_files: int = 2000, stats_out: dict[str, object] | None = None
+) -> tuple[SourceIngestionResult, list[AttackSurfaceItem]]:
     """The actual SOURCE MODE analysis, returning raw AttackSurfaceItem
     objects rather than audit_source()'s serialized dict -- for a caller
     (P3.3-4's HYBRID orchestrator) that needs to feed them into
@@ -18,7 +20,7 @@ def collect_source_items(root: Path | str, max_files: int = 2000) -> tuple[Sourc
     """
     ingestion = ingest_source(root, max_files=max_files)
     routes = extract_routes(ingestion.files)
-    items = routes + analyze_files(ingestion.files, routes)
+    items = routes + analyze_files(ingestion.files, routes, stats_out=stats_out)
     return ingestion, items
 
 
@@ -29,7 +31,8 @@ def audit_source(root: Path | str, max_files: int = 2000) -> dict[str, object]:
     exploitability confirmation is LIVE verification's job (HYBRID MODE,
     U8/P3.3), not this module's.
     """
-    ingestion, items = collect_source_items(root, max_files=max_files)
+    interprocedural_stats: dict[str, object] = {}
+    ingestion, items = collect_source_items(root, max_files=max_files, stats_out=interprocedural_stats)
 
     by_asset_type: dict[str, int] = {}
     for item in items:
@@ -49,4 +52,6 @@ def audit_source(root: Path | str, max_files: int = 2000) -> dict[str, object]:
         # P4.5 WP-01: one entry per (route, concrete method) -- state-
         # changing methods included, with inferred request shape.
         "endpoint_inventory": [spec.to_dict() for spec in build_endpoint_inventory(items)],
+        # P4.6 WP-04: depth/node/time caps hit, if any.
+        "interprocedural": interprocedural_stats,
     }
