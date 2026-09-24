@@ -11,4 +11,4 @@ What v5.0 supports end to end, and what it deliberately does not (v5.0 개발 �
 | Static — 기타 언어 | Django `path()`, Spring/Rails/Gin 등은 탐지 신호만 | Java/Spring, PHP, Go, .NET, Rails AST/dataflow |
 | Judge | canary/regex/refusal 규칙 기반 1차 + opt-in semantic 2차, 충돌·저신뢰 시 `needs_review` | LLM 판단만으로 confirmed |
 | Evidence | raw/sanitized 분리, SHA-256 manifest, redaction, report 시 재검증 | 법적/조직별 제출 형식 자동 대응 |
-| Interface | 로컬 CLI (`scan`, `validate`, `reproduce`, `report`, `benchmark` 등) | SaaS, 대시보드, 멀티유저/팀 계정, 중앙 서버 |
+| Interface | 로컬 CLI (`scan`, `validate`, `reproduce`, `report`, `benchmark`, `release-check` 등) | SaaS, 대시보드, 멀티유저/팀 계정, 중앙 서버 |

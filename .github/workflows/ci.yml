@@ -45,6 +45,9 @@ jobs:
       - name: Ground-truth quality gate
         run: python main.py quality-gate
 
+      - name: v5.0.0 release gate checklist (G1-G10, offline)
+        run: python main.py release-check
+
       - name: Benchmark dataset regression gate (v4.7 WP-07)
         run: python main.py benchmark --baseline benchmarks/baselines/baseline.json --timeout 120 --out runs/benchmark-report.json
 
