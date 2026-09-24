@@ -58,7 +58,7 @@ def find_auth_guards(path: Path, text: str, route_handlers: set[str]) -> list[Au
         return []
     try:
         tree = ast.parse(text, filename=str(path))
-    except (SyntaxError, ValueError):
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
         return []
 
     hints: list[AuthGuardHint] = []

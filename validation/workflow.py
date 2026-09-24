@@ -7,6 +7,7 @@ import httpx
 
 from core.models import Finding, FindingStatus, Reproduction, Run, new_id, utc_now
 from reporting.evidence import write_evidence_bundle
+from reporting.integrity import build_run_manifest
 from scope.policy import PolicyEngine
 from source.audit import collect_source_items
 from source.endpoints import EndpointSpec, build_endpoint_inventory, load_captured_requests
@@ -241,14 +242,22 @@ def write_validation_report(store: SQLiteStore, run_id: str, out_dir: Path | str
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     evidence_by_id = {row["id"]: row for row in store.list_evidence(run_id)}
+    # P4.7 WP-08: re-hash every evidence file now; a report never silently
+    # cites evidence that changed after it was recorded.
+    manifest = build_run_manifest(store, run_id)
+    tampered = {entry.evidence_id for entry in manifest.entries if entry.tamper_detected}
     index: list[dict[str, object]] = []
 
     for finding in store.list_findings([run_id]):
         evidence = evidence_by_id.get(finding.evidence_ref)
         evidence_info = (
-            {"id": evidence["id"], "path": evidence["path"], "sha256": evidence["sha256"]} if evidence is not None else None
+            {"id": evidence["id"], "path": evidence["path"], "sha256": evidence["sha256"], "tamper_detected": evidence["id"] in tampered}
+            if evidence is not None
+            else None
         )
-        evidence_payload = json.loads(Path(evidence["path"]).read_text(encoding="utf-8")) if evidence is not None else {}
+        evidence_payload: dict[str, object] = {}
+        if evidence is not None and evidence["id"] not in tampered:
+            evidence_payload = json.loads(Path(evidence["path"]).read_text(encoding="utf-8"))
         reproductions = [
             {"attempts": row["attempts"], "successes": row["successes"], "status": row["status"]}
             for row in store.list_reproductions(finding.id)
@@ -284,6 +293,7 @@ def write_validation_report(store: SQLiteStore, run_id: str, out_dir: Path | str
             f"- 판정 근거: {payload['reason'] or '(없음)'}",
             f"- Evidence: `{evidence_info['path'] if evidence_info else '(없음)'}`",
             f"- Evidence SHA-256: `{evidence_info['sha256'] if evidence_info else '(없음)'}`",
+            f"- Evidence 무결성: {'변조 감지됨 — 이 finding의 근거를 신뢰하지 말 것' if evidence_info and evidence_info['tamper_detected'] else '검증됨'}",
             "",
             "## 재현 기록",
             "",
@@ -304,6 +314,12 @@ def write_validation_report(store: SQLiteStore, run_id: str, out_dir: Path | str
     by_status: dict[str, int] = {}
     for entry in index:
         by_status[str(entry["status"])] = by_status.get(str(entry["status"]), 0) + 1
-    summary = {"run_id": run_id, "report_dir": str(out), "findings": index, "findings_by_status": by_status}
+    summary = {
+        "run_id": run_id,
+        "report_dir": str(out),
+        "findings": index,
+        "findings_by_status": by_status,
+        "integrity": {"evidence_entries": len(manifest.entries), "tamper_detected": sorted(tampered)},
+    }
     (out / "index.json").write_text(json.dumps(summary, indent=2, sort_keys=True), encoding="utf-8")
     return summary

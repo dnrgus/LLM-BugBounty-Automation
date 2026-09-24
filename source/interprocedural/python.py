@@ -137,7 +137,7 @@ class ProjectIndex:
         for file in files:
             try:
                 tree = ast.parse(file.read_text(encoding="utf-8", errors="ignore"), filename=str(file))
-            except (SyntaxError, ValueError, OSError):
+            except (SyntaxError, ValueError, OSError, RecursionError, MemoryError):
                 continue
             trees[_module_name(root, file)] = (file, tree)
 

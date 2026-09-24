@@ -574,6 +574,40 @@ python main.py sample-run --semantic-judge-config config/semantic_judge.example.
 - Python interprocedural: class method 호출(`self.repo.find(x)`)은 receiver 타입 추론 없이 명시적으로 끊김(추측하지 않음), sanitizer 인식 없음
 - Semantic judge는 기본 비활성, `sample-run` 경로에만 연결됨
 
+## v4.7.0 Release Gate
+
+"실전 Benchmark와 안정화" 게이트입니다 (v5.0 개발 계획서 WP-07, WP-08). 이 단계부터는 기능 추가보다 측정 결과를 우선합니다.
+
+```bash
+pytest   # 689 passed
+pytest -m "p0 or p1" tests/regression   # P0/P1 회귀 스위트
+python main.py benchmark --baseline benchmarks/baselines/baseline.json   # 회귀 시 exit 1
+```
+
+### v4.7.0 benchmark 결과 (데이터셋 범위와 함께)
+
+데이터셋 `benchmarks/datasets/manifest.yaml`(v5-benchmark): 저장소 내장 fixture 5개 + offline fake LLM/RAG/agent target 3개. **외부 실제 취약 앱은 포함되어 있지 않습니다** — `kind: external`(`path_env`)로 로컬에 clone한 앱을 등록할 수 있고, 등록하지 않으면 `skipped`로 보고됩니다.
+
+| 구분 | target | ground truth | TP | FP | FN | precision | recall |
+|---|---|---|---|---|---|---|---|
+| overall (holdout 제외) | 7 | 14 | 12 | 0 | 2 | 1.00 | 0.86 |
+| holdout | 1 | 2 | 1 | 0 | 1 | 1.00 | 0.50 |
+
+- 미탐 원인: `dataflow_cut` 2건(Python class method 호출, JS/TS 함수 간 호출), `policy_blocked` 1건(scope 예시가 `tool_abuse: false`)
+- 안정성(품질과 별도 집계): ok 8 / error 0 / timeout 0 / skipped 0
+- 숫자는 작은 자체 데이터셋 기준이라 일반 성능을 뜻하지 않습니다
+
+### v4.7.0 완료 범위
+
+- **Benchmark dataset (WP-07)**: 버전마다 같은 manifest를 재실행, target별/그룹별/holdout TP·FP·FN과 데이터셋 크기, 미탐 원인 taxonomy(unsupported_framework, dataflow_cut, auth_context_missing, validator_limitation, judge_false_negative, policy_blocked), LLM target의 재현 시도/성공 횟수, 커밋된 baseline 대비 회귀 게이트(CI)
+- **안정성/회귀 (WP-08)**: target별 timeout과 crash 격리(한 target 실패가 나머지를 멈추지 않음). 비정상 입력(깊은 중첩, 바이너리, 잘못된 UTF-8, 거대 파일, symlink loop)은 파일 단위로 격리되고 `interprocedural.file_errors`에 기록. `report`가 evidence hash를 재검증해 변조된 근거를 표시하고 인용하지 않음. `pytest -m p0/p1` 이름 있는 회귀 스위트를 CI 단계로 추가
+
+### v4.7.0 알려진 제한사항 (Known Limitations)
+
+- JS/TS sink 별칭 미해석: `const childProcess = require('child_process'); childProcess.exec(x)`처럼 모듈을 다른 이름에 담으면 sink로 인식하지 않음(benchmark 작성 중 발견, 미수정)
+- timeout된 분석 thread는 강제 종료할 수 없어 백그라운드에 남음(보고 후 다음 target 진행)
+- v4.6.0 제한사항 계속 유효
+
 ## 마일스톤
 
 설계서 기준 실행 가능한 마일스톤은 다음과 같습니다.
@@ -594,6 +628,7 @@ python main.py sample-run --semantic-judge-config config/semantic_judge.example.
 - `v4.4.0`: Accuracy & Benchmark (ground truth schema, metric engine, matching/scoring, CI quality gate, confidence calibration) — v4.1.0-v4.4.0 로드맵 완결
 - `v4.5.0`: API/Auth 검증 연결 (HTTP method/body inventory + 상태 변경 정책 gate, tester-owned auth context 비교, scan -> validate -> reproduce -> report CLI)
 - `v4.6.0`: 분석 정확도와 Judge 보강 (Python interprocedural dataflow + caps, semantic judge 보조 layer / needs_review) — JS/TS 함수 간 추적은 제한사항
+- `v4.7.0`: 실전 Benchmark와 안정화 (dataset manifest + baseline 회귀 게이트, 미탐 원인 분류, crash/timeout 격리, evidence 재검증, P0/P1 회귀 스위트)
 
 ## 개발 흐름
 

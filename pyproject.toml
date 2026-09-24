@@ -79,3 +79,7 @@ validation = ["templates/*.yaml"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "p0: v5.0 plan 7.3 P0 invariants (crash, scope bypass, evidence damage, dangerous-request misclassification)",
+    "p1: v5.0 plan 7.3 P1 invariants (CLI flow breaks, reproduction failures)",
+]

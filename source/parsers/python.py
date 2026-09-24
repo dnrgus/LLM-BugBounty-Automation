@@ -32,7 +32,7 @@ class PythonASTParser:
     def parse_file(self, path: Path, text: str) -> ParserResult:
         try:
             tree = ast.parse(text, filename=str(path))
-        except (SyntaxError, ValueError) as exc:
+        except (SyntaxError, ValueError, RecursionError, MemoryError) as exc:
             return ParserResult(language=self.language, errors=[f"{path}: {exc}"])
 
         visitor = _RouteAndCallVisitor(path)

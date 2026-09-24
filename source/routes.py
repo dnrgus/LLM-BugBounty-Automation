@@ -53,7 +53,11 @@ def extract_routes(files: list[SourceFile]) -> list[AttackSurfaceItem]:
         except OSError:
             continue
         parser = _AST_PARSERS.get(source_file.language)
-        result = parser.parse_file(source_file.path, text)
+        try:
+            result = parser.parse_file(source_file.path, text)
+        except (RecursionError, MemoryError):
+            regex_fallback_files.append(source_file)  # P4.7 WP-08: degrade, never abort
+            continue
         if result.errors:
             regex_fallback_files.append(source_file)
         else:
