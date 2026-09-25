@@ -116,7 +116,9 @@ async def run_external_tool(
             stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=timeout_seconds)
         except asyncio.TimeoutError:
             process.kill()
-            await process.wait()
+            # communicate(), not wait(): drains and closes the stdout/stderr
+            # pipes too, so a killed tool never leaks its transports.
+            await process.communicate()
             return ToolExecutionResult(
                 tool_id=tool.id,
                 status="timeout",
@@ -135,7 +137,9 @@ async def run_external_tool(
 
         if communicate_task not in done:
             process.kill()
-            await process.wait()
+            # communicate(), not wait(): drains and closes the stdout/stderr
+            # pipes too, so a killed tool never leaks its transports.
+            await process.communicate()
             if cancel_wait_task in done:
                 return ToolExecutionResult(
                     tool_id=tool.id,
