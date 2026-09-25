@@ -579,7 +579,7 @@ python main.py sample-run --semantic-judge-config config/semantic_judge.example.
 v5.0.0은 "더 이상 기능을 추가하지 않아도 된다"는 기준선입니다. 지원 범위와 미지원 범위를 문서로 구분하고, 그 범위 안에서 탐지 → 안전 검증 → 재현 → 증거 → 보고를 끝까지 수행합니다. 이후 개선은 실제 허가된 대상에서 반복 확인된 실패만 5.0.x 패치로 반영합니다.
 
 ```bash
-pytest                        # 701 passed
+pytest                        # 702 passed
 pytest -m "p0 or p1" tests/regression
 python main.py release-check  # G1-G10 모두 통과해야 exit 0 (offline)
 python main.py benchmark --baseline benchmarks/baselines/baseline.json
@@ -604,6 +604,12 @@ python main.py benchmark --baseline benchmarks/baselines/baseline.json
 - `docs/SCHEMAS.md` — 고정된 schema 버전, scope/policy 키, evidence 디렉터리 구조와 manifest, report 필수 필드, 재현 기록
 - `docs/SUPPORT_MATRIX.md` — v5.0 지원/미지원 범위
 - `docs/KNOWN_LIMITATIONS.md` — 통합된 알려진 제한사항
+
+### v5.0.1 패치 (재점검에서 발견)
+
+- **SQLite 연결 누수**: `SQLiteStore.connect()`가 commit만 하고 연결을 닫지 않아 호출마다 연결이 남았음(Windows에서는 DB 파일 잠금 원인). commit/rollback 후 항상 닫도록 수정
+- **외부 도구 프로세스 pipe 누수**: timeout/취소로 kill한 도구의 stdout/stderr pipe가 닫히지 않았음. kill 후 `communicate()`로 정리
+- **재현 기록의 버전 오표기**: editable 설치 메타데이터가 오래되면 `package_version`이 `0.1.0`으로 기록됐음. 소스 트리의 `pyproject.toml`을 우선 사용
 
 ### v5.0.0 이후 운영 원칙
 
@@ -673,6 +679,7 @@ python main.py benchmark --baseline benchmarks/baselines/baseline.json   # 회�
 - `v4.6.0`: 분석 정확도와 Judge 보강 (Python interprocedural dataflow + caps, semantic judge 보조 layer / needs_review) — JS/TS 함수 간 추적은 제한사항
 - `v4.7.0`: 실전 Benchmark와 안정화 (dataset manifest + baseline 회귀 게이트, 미탐 원인 분류, crash/timeout 격리, evidence 재검증, P0/P1 회귀 스위트)
 - `v5.0.0`: 기능 동결 — 고정된 계약(schema/exit code/finding 상태/report 필드), 재현 환경 기록, 문서(CLI/schema/지원 matrix/제한사항), offline release gate `release-check` G1-G10
+- `v5.0.1`: 재점검 패치 — SQLite 연결/외부 도구 pipe 리소스 누수, 재현 기록 버전 오표기 수정
 
 ## 개발 흐름
 

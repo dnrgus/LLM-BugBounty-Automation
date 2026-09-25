@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import contextmanager
+from typing import Iterator
 from dataclasses import asdict
 from pathlib import Path
 
@@ -38,11 +40,19 @@ class SQLiteStore:
     def __init__(self, path: Path | str):
         self.path = Path(path)
 
-    def connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        """Commit on success, roll back on error, and always close.
+        (sqlite3's own `with conn:` only commits -- it never closes, which
+        leaked one connection per call and held Windows file locks.)"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
     def initialize(self) -> None:
         with self.connect() as conn:

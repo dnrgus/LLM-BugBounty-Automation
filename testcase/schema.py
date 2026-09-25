@@ -10,6 +10,8 @@ SESSION_STRATEGIES = {"per_testcase", "shared_suite", "persistent"}
 
 @dataclass(frozen=True)
 class Testcase:
+    __test__ = False  # a domain model, not a pytest test class
+
     id: str
     name: str
     category: str

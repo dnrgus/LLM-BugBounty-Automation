@@ -110,3 +110,12 @@ def test_reproduce_records_execution_environment(tmp_path: Path, capsys: pytest.
 
 def test_execution_environment_includes_extra_fields() -> None:
     assert execution_environment(attempts=3)["attempts"] == 3
+
+
+def test_package_version_comes_from_the_source_tree() -> None:
+    from core.contract import package_version
+
+    import tomllib
+
+    expected = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+    assert package_version() == expected

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import platform
 import sys
+import tomllib
 from importlib import metadata
 from pathlib import Path
 
@@ -62,6 +63,15 @@ def check_schema_version(kind: str, value: object) -> None:
 
 
 def package_version() -> str:
+    """The source tree's pyproject.toml wins over installed metadata: an
+    editable install keeps the version it was installed with, so after a
+    `git pull` the metadata can be stale (it reported 0.1.0 on 5.0.0)."""
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if pyproject.exists():
+        try:
+            return str(tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"])
+        except (tomllib.TOMLDecodeError, KeyError):
+            pass
     try:
         return metadata.version("llm-bugbounty-automation")
     except metadata.PackageNotFoundError:
