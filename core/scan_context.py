@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-DEFAULT_RESULTS_DIRNAME = "BugBounty-Results"
+from core.paths import results_root
 
 
 @dataclass
@@ -82,7 +82,7 @@ class ScanContext:
     max_pages: int = 5
     verbose: bool = False
     auth: AuthContext = field(default_factory=AuthContext)
-    output_dir: Path = field(default_factory=lambda: Path(DEFAULT_RESULTS_DIRNAME))
+    output_dir: Path = field(default_factory=results_root)
     # Populated during the scan; a shared endpoint registry (WP-06/08) so
     # scanners reuse discovery instead of each re-crawling.
     endpoints: list[dict[str, Any]] = field(default_factory=list)
@@ -98,11 +98,11 @@ class ScanContext:
         max_pages: int = 5,
         verbose: bool = False,
         auth: AuthContext | None = None,
-        results_base: Path | str = DEFAULT_RESULTS_DIRNAME,
+        results_base: Path | str | None = None,
         now: datetime | None = None,
     ) -> "ScanContext":
         stamp = (now or datetime.now()).strftime("%Y-%m-%d_%H%M%S")
-        output_dir = Path(results_base) / f"{target_slug(target, source_path)}_{stamp}"
+        output_dir = Path(results_base or results_root()) / f"{target_slug(target, source_path)}_{stamp}"
         return cls(
             target=target,
             source_path=Path(source_path) if source_path is not None else None,

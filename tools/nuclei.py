@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
 from tools.runner import ExternalScanOptions, ExternalTool
 
 

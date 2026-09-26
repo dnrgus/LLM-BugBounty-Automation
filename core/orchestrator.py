@@ -6,10 +6,10 @@ from pathlib import Path
 
 import httpx
 
-from adapters.llm.pyrit import PyRITAdapter
-from adapters.scanner.dalfox import DalfoxAdapter
-from adapters.scanner.nuclei import NucleiAdapter
-from adapters.secrets.trufflehog import TruffleHogAdapter
+from tools.adapters.llm.pyrit import PyRITAdapter
+from tools.adapters.scanner.dalfox import DalfoxAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.secrets.trufflehog import TruffleHogAdapter
 from attack_surface.models import AttackSurfaceItem
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
@@ -29,6 +29,7 @@ from core.models import (
     Trace,
     new_id,
 )
+from core.paths import evidence_raw_dir, evidence_sanitized_dir, shareable_reports_dir
 from core.profile import PipelineProfile
 from core.profiler import profile_target
 from correlation.resolver import EntityMatch, resolve_entities
@@ -244,7 +245,7 @@ async def run_sample_pipeline(
     # artifact; the raw path/hash are provenance, not what a report
     # should link to.
     manifest = build_run_manifest(store, run.id)
-    manifest_path = write_manifest(Path("reports/shareable"), manifest)
+    manifest_path = write_manifest(shareable_reports_dir(), manifest)
 
     return {
         "run_id": run.id,
@@ -270,7 +271,7 @@ def _cluster_and_report(run: Run, findings: list[Finding], reports: list[str]) -
     if not findings:
         return []
     clusters = cluster_findings(findings)
-    report_path = write_cluster_report(Path("reports/shareable"), run, clusters)
+    report_path = write_cluster_report(shareable_reports_dir(), run, clusters)
     reports.append(str(report_path))
     return [cluster.to_dict() for cluster in clusters]
 
@@ -363,7 +364,7 @@ async def _process_case(
         layered = judges.layered(judgement, case, response.prompt, response.text)
         evidence_payload["judge_layers"] = layered.to_dict()
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"), Path("evidence/sanitized"), f"{run.id}_{case.id}.json", evidence_payload
+        evidence_raw_dir(), evidence_sanitized_dir(), f"{run.id}_{case.id}.json", evidence_payload
     )
     evidence = store.record_evidence(run.id, "llm_response", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path)
     if not judgement.passed:
@@ -400,7 +401,7 @@ async def _process_case(
         findings.append(finding)
         metadata = evidence_bundle.to_dict()
         report = write_markdown_report(
-            Path("reports/shareable"),
+            shareable_reports_dir(),
             run,
             case,
             finding,
@@ -410,7 +411,7 @@ async def _process_case(
             evidence_metadata=metadata,
         )
         json_report = write_json_report(
-            Path("reports/shareable"),
+            shareable_reports_dir(),
             run,
             case,
             finding,
@@ -610,7 +611,7 @@ async def run_full_pipeline(
     if combined_findings:
         clusters = cluster_findings(combined_findings)
         combined_run = Run(target_id="full", policy_hash=policy.policy_hash, fingerprint="combined")
-        report_path = write_cluster_report(Path("reports/shareable"), combined_run, clusters)
+        report_path = write_cluster_report(shareable_reports_dir(), combined_run, clusters)
         all_reports.append(str(report_path))
         result["combined_clusters"] = [cluster.to_dict() for cluster in clusters]
     else:
@@ -1048,8 +1049,8 @@ async def run_reproduce_finding(
         poc = await minimize_poc(case, target, judges, session_prefix=session_prefix)
         result["minimal_poc"] = poc.to_dict()
         evidence_bundle = write_evidence_bundle(
-            Path("evidence/raw"),
-            Path("evidence/sanitized"),
+            evidence_raw_dir(),
+            evidence_sanitized_dir(),
             f"{finding_id}_minimal_poc.json",
             {
                 "finding_id": finding_id,

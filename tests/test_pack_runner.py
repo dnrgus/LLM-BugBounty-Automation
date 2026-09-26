@@ -229,7 +229,7 @@ def test_run_selected_packs_runs_nuclei_live_when_installed_and_a_live_target_ur
         parse_output=lambda stdout: [
             __import__("json").loads(line) for line in stdout.splitlines() if line.strip()
         ],
-        normalizer=__import__("adapters.scanner.nuclei", fromlist=["NucleiAdapter"]).NucleiAdapter(),
+        normalizer=__import__("tools.adapters.scanner.nuclei", fromlist=["NucleiAdapter"]).NucleiAdapter(),
     )
 
     with patch("packs.runner._LIVE_TOOL_FACTORIES", {"nuclei": lambda options: fixture_tool}):

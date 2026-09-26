@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from adapters.base import NormalizedResult, ToolSource, safe_float
+from tools.adapters.base import NormalizedResult, ToolSource, safe_float
 
 
 class GarakAdapter:

@@ -10,6 +10,8 @@ from typing import Any
 
 import yaml
 
+from core.paths import internal_dir
+
 
 @dataclass(frozen=True)
 class ToolStatus:
@@ -65,7 +67,8 @@ def detect_version(name: str) -> str | None:
     return None
 
 
-def write_tool_lock(snapshot: dict[str, object], path: Path | str = "tool_versions.lock.yaml") -> Path:
-    lock_path = Path(path)
+def write_tool_lock(snapshot: dict[str, object], path: Path | str | None = None) -> Path:
+    lock_path = Path(path) if path is not None else internal_dir("tool_versions.lock.yaml")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     lock_path.write_text(yaml.safe_dump(snapshot, sort_keys=True), encoding="utf-8")
     return lock_path

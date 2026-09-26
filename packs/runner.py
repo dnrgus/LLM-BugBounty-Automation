@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from adapters.scanner.dalfox import DalfoxAdapter
-from adapters.scanner.nuclei import NucleiAdapter
-from adapters.secrets.trufflehog import TruffleHogAdapter
+from tools.adapters.scanner.dalfox import DalfoxAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.secrets.trufflehog import TruffleHogAdapter
 from core.models import new_id
 from core.orchestrator import run_sample_pipeline
 from core.profile import PipelineProfile

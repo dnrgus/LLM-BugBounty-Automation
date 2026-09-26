@@ -10,7 +10,7 @@ live Juice Shop server:
 
 from pathlib import Path
 
-from adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
 from findings.external_tool import promote_external_tool_findings
 from packs.runner import PackRunResult
 from reporting.results import write_scan_results

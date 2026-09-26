@@ -31,7 +31,7 @@ Check local runtime and optional tools
 - `--tools` (default: `config/tools.yaml`)
 - `--json` — Print machine-readable doctor output
 - `--write-lock` — Write tool_versions.lock.yaml
-- `--lockfile` (default: `tool_versions.lock.yaml`)
+- `--lockfile` (default: `results/BugBounty-Results/_internal/tool_versions.lock.yaml`)
 
 ### `tools`
 
@@ -59,7 +59,7 @@ Run the offline fake target pipeline
 
 - `--scope` (default: `config/scope.example.yaml`)
 - `--testcases` (default: `testcase/suites/basic.yaml`)
-- `--db` (default: `runs/sample.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/sample.sqlite`)
 - `--target` (default: `fake-llm`)
 - `--target-config` — YAML target config (see config/targets/*.example.yaml); overrides --target
 - `--resume-run-id` — P3.4-1: reuse this run_id and skip its already-completed testcases (from a prior invocation against the same --db) instead of a fresh run. Rejects the call if --testcases/--target/etc. changed since that run_id was started.
@@ -79,7 +79,7 @@ Show testcase coverage for a target profile
 Probe a target's capabilities (declared config + observed multi-turn behavior)
 
 - `--scope` (default: `config/scope.example.yaml`)
-- `--db` (default: `runs/profile.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/profile.sqlite`)
 - `--target` (default: `fake-llm`)
 - `--target-config` — YAML target config; overrides --target
 - `--no-probe` — Skip active probing; report only the target's declared capabilities
@@ -91,7 +91,7 @@ Re-run reproduction for a stored finding against a live target, optionally minim
 - `finding_id`
 - `--scope` (default: `config/scope.example.yaml`)
 - `--testcases` (default: `testcase/suites/basic.yaml`)
-- `--db` (default: `runs/sample.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/sample.sqlite`)
 - `--target` (default: `fake-llm`)
 - `--target-config` — YAML target config; overrides --target
 - `--minimize` — If the finding still reproduces, also generate a minimal PoC
@@ -105,7 +105,7 @@ Run safe validators over a `scan --source` artifact (scope + method policy gate,
 - `--artifact` **required**
 - `--base-url` **required** — Base URL of the authorized target
 - `--scope` (default: `config/scope.example.yaml`)
-- `--db` (default: `runs/validate.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/validate.sqlite`)
 - `--auth-contexts`
 - `--key-field` — response field compared (as a hash)
 
@@ -114,8 +114,8 @@ Run safe validators over a `scan --source` artifact (scope + method policy gate,
 Write per-finding reports for a `validate` run
 
 - `--run-id` **required**
-- `--db` (default: `runs/validate.sqlite`)
-- `--out` (default: `reports/validation`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/validate.sqlite`)
+- `--out` (default: `results/BugBounty-Results/_internal/reports/validation`)
 
 ### `judge-benchmark`
 
@@ -185,7 +185,7 @@ Execute PyRIT-informed adaptive mutations through the Executor/Judge/Reproducer 
 - `--scope` (default: `config/scope.example.yaml`)
 - `--testcases` (default: `testcase/suites/basic.yaml`)
 - `--input` **required**
-- `--db` (default: `runs/adaptive.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/adaptive.sqlite`)
 - `--target` (default: `fake-llm`)
 - `--target-config` — YAML target config; overrides --target
 
@@ -196,7 +196,7 @@ Build a scope-revalidated asset map from Subfinder/httpx/Katana/ffuf output
 - `--scope` (default: `config/scope.example.yaml`)
 - `--run-id` (default: `run_fixture`)
 - `--target-id` (default: `target_fixture`)
-- `--db` (default: `runs/recon.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/recon.sqlite`)
 - `--subfinder-input`
 - `--httpx-input`
 - `--katana-input`
@@ -225,7 +225,7 @@ U9 Scenario Engine: run a multi-turn/cross-session Scenario suite against a targ
 
 - `--scope` (default: `config/scope.example.yaml`)
 - `--scenarios` (default: `scenario/suites/basic.yaml`)
-- `--db` (default: `runs/scenario.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/scenario.sqlite`)
 - `--target` (default: `fake-llm`)
 - `--target-config` — Required for --target openai; ignored for the fake targets
 
@@ -238,7 +238,7 @@ LIVE MODE: passively crawl a URL (GET/HEAD only, no attack payloads) for candida
 - `--max-pages` (default: `5`)
 - `--classify` — U5 Auto Profiler: also classify discovered items into web/api/graphql/llm/rag/agent/websocket candidates
 - `--auto-profile` — U5 Auto Profiler: classify, then hand llm/api candidates to the Capability Probe for best-effort verification (implies --classify)
-- `--db` (default: `runs/discover.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/discover.sqlite`)
 - `--select-packs` — U6 Pack Selector: classify, then decide which Attack Packs apply given policy and (optional) budget
 - `--pack-budget-requests` — Optional request budget ceiling used only for --select-packs' budget check
 - `--run-packs` — U7: actually run selected packs (implies --select-packs) -- testcase_suite packs run against --pack-target; external-tool packs (nuclei/dalfox/trufflehog) only run if you supply their results file
@@ -266,12 +266,12 @@ LIVE MODE: `scan <url>` discovers/classifies/selects/runs packs end-to-end (P3.1
 - `--tool-timeout` (default: `600.0`) — Per-tool subprocess timeout in seconds for live scanners (default 600).
 - `--no-dast` (default: `True`) — Disable nuclei DAST parameter fuzzing (on by default for live URL scans).
 - `--full-templates` — With DAST, also run the full nuclei template set (slower, broader) instead of only the fast fuzzing templates.
-- `--output, -o` — Results directory. Default: a timestamped folder under ./BugBounty-Results/.
+- `--output, -o` — Results directory. Default: a timestamped folder under ./results/BugBounty-Results/.
 - `--param-endpoint` — Parameterized URL to DAST-fuzz (e.g. http://host/search?q=x); repeatable. Scope-validated. Use to reach endpoints the passive crawler can't (e.g. SPA APIs).
 - `--endpoints-file` — File of parameterized URLs (one per line, # comments) to DAST-fuzz.
 - `--quiet` — Suppress the [n/6] progress lines on stderr.
 - `--testcases` (default: `testcase/suites/basic.yaml`)
-- `--db` (default: `runs/scan.sqlite`)
+- `--db` (default: `results/BugBounty-Results/_internal/runs/scan.sqlite`)
 - `--max-pages` (default: `5`) — LIVE/HYBRID MODE only: max pages for the discovery crawl
 - `--auto-profile` — LIVE MODE only: verify classified llm/api candidates via the Capability Probe
 - `--pack-target`

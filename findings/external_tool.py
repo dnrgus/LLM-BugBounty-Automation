@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from core.models import Finding, FindingStatus, new_id
+from core.paths import evidence_raw_dir, evidence_sanitized_dir
 from packs.runner import PackRunResult
 from reporting.evidence import write_evidence_bundle
 from storage.sqlite import SQLiteStore
@@ -42,7 +42,7 @@ _VALID_SEVERITIES = {"info", "low", "medium", "high", "critical"}
 
 def _severity_of(item: dict[str, object]) -> str:
     """Preserve the tool-reported severity that the scanner adapters
-    (adapters/scanner/nuclei.py, dalfox.py) already captured into
+    (tools/adapters/scanner/nuclei.py, dalfox.py) already captured into
     metadata.severity. Without this, a nuclei "critical" (e.g. an
     error-based SQLi) and an "info" exposure both collapsed to a
     hardcoded "medium", losing the triage signal. Unknown/missing
@@ -93,8 +93,8 @@ def _promote_one(tool_id: str, item: dict[str, object], run_id: str, store: SQLi
         endpoint = str(item["endpoint"]) if item.get("endpoint") else None
 
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"),
-        Path("evidence/sanitized"),
+        evidence_raw_dir(),
+        evidence_sanitized_dir(),
         f"{run_id}_{tool_id}_{new_id('extfinding')}.json",
         dict(item),
     )

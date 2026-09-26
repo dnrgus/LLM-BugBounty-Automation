@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from adapters.secrets.trufflehog import TruffleHogAdapter
+from tools.adapters.secrets.trufflehog import TruffleHogAdapter
 from tools.runner import ExternalTool
 
 
@@ -15,6 +15,8 @@ def _parse_output(stdout: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in stdout.splitlines() if line.strip()]
 
 
+# Status: planned -- defined here but not wired into the default scan or
+# any Pack yet (nothing imports it).
 # Filesystem-scan mode only (not a URL fetch -- TruffleHog itself has no
 # "scan this single URL" mode). Callers with a local path (e.g. a
 # downloaded page/JS bundle) can run this directly; wiring it into a live

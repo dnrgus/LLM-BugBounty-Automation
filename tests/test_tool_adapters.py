@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 
-from adapters.base import safe_float
-from adapters.llm.garak import GarakAdapter
-from adapters.llm.promptfoo import PromptfooAdapter
-from adapters.llm.pyrit import PyRITAdapter
-from adapters.scanner.dalfox import DalfoxAdapter
-from adapters.scanner.nuclei import NucleiAdapter
-from adapters.secrets.trufflehog import TruffleHogAdapter
+from tools.adapters.base import safe_float
+from tools.adapters.llm.garak import GarakAdapter
+from tools.adapters.llm.promptfoo import PromptfooAdapter
+from tools.adapters.llm.pyrit import PyRITAdapter
+from tools.adapters.scanner.dalfox import DalfoxAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.secrets.trufflehog import TruffleHogAdapter
 from core.tool_doctor import check_tools, write_tool_lock
 
 

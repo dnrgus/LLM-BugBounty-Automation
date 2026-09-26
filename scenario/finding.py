@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 from core.models import Finding, FindingStatus
+from core.paths import evidence_raw_dir, evidence_sanitized_dir
 from reporting.evidence import write_evidence_bundle
 from scenario.models import Scenario, ScenarioResult
 from storage.sqlite import SQLiteStore
@@ -36,8 +36,8 @@ def promote_scenario_result(scenario: Scenario, result: ScenarioResult, store: S
             continue
         step = steps_by_id[step_result.step_id]
         evidence_bundle = write_evidence_bundle(
-            Path("evidence/raw"),
-            Path("evidence/sanitized"),
+            evidence_raw_dir(),
+            evidence_sanitized_dir(),
             f"{result.run_id}_{scenario.id}_{step_result.step_id}.json",
             {
                 "scenario_id": scenario.id,

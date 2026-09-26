@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Callable
 
-from adapters.scanner.dalfox import DalfoxAdapter
+from tools.adapters.scanner.dalfox import DalfoxAdapter
 from tools.runner import ExternalScanOptions, ExternalTool
 
 

@@ -7,6 +7,7 @@ import httpx
 
 from attack_surface.models import AttackSurfaceItem
 from core.orchestrator import run_sample_pipeline
+from core.paths import evidence_raw_dir, evidence_sanitized_dir
 from core.profile import PipelineProfile
 from correlation.resolver import EntityMatch
 from findings.correlation import CorrelatedFinding
@@ -171,7 +172,7 @@ async def run_endpoint_validation(
     result = _endpoint_result(task, evidence, match.confidence)
 
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{task.id}_endpoint.json", evidence.to_dict()
+        evidence_raw_dir(), evidence_sanitized_dir(), f"{run_id}_{task.id}_endpoint.json", evidence.to_dict()
     )
     stored_evidence = store.record_evidence(
         run_id, "endpoint_validation", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
@@ -219,7 +220,7 @@ async def run_auth_validation(
     )
 
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{task.id}_auth.json", comparison.to_dict()
+        evidence_raw_dir(), evidence_sanitized_dir(), f"{run_id}_{task.id}_auth.json", comparison.to_dict()
     )
     stored_evidence = store.record_evidence(
         run_id, "auth_validation", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path
@@ -263,7 +264,7 @@ async def run_dataflow_validation(
     )
 
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{task.id}_dataflow.json", evidence.to_dict()
+        evidence_raw_dir(), evidence_sanitized_dir(), f"{run_id}_{task.id}_dataflow.json", evidence.to_dict()
     )
     stored_evidence = store.record_evidence(
         run_id, "dataflow_validation", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path

@@ -38,12 +38,12 @@ jsts = [
 [tool.setuptools]
 py-modules = ["cli", "main"]
 packages = [
-  "adapters",
-  "adapters.llm",
-  "adapters.recon",
-  "adapters.discovery",
-  "adapters.scanner",
-  "adapters.secrets",
+  "tools.adapters",
+  "tools.adapters.llm",
+  "tools.adapters.recon",
+  "tools.adapters.discovery",
+  "tools.adapters.scanner",
+  "tools.adapters.secrets",
   "attack_surface",
   "attacks",
   "benchmarks",
