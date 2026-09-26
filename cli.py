@@ -87,6 +87,40 @@ def _json(data: object) -> str:
     return json.dumps(data, indent=2, sort_keys=True)
 
 
+# Human-readable purpose per tool, keyed by tool name with a category
+# fallback, for `bugbounty tools` / `doctor` (§16, §18). Purely cosmetic:
+# the source of truth for what is enabled stays config/tools.yaml.
+_TOOL_PURPOSE = {
+    "nuclei": "Dynamic / DAST",
+    "dalfox": "XSS",
+    "semgrep": "Static analysis",
+    "promptfoo": "LLM red team",
+    "garak": "LLM scanner",
+    "pyrit": "LLM red team",
+    "trufflehog": "Secret scan",
+    "subfinder": "Subdomain recon",
+    "httpx": "HTTP probe",
+    "katana": "Crawl / discovery",
+    "ffuf": "Fuzzing / discovery",
+}
+_CATEGORY_PURPOSE = {
+    "web_scanner": "Dynamic scan",
+    "static_analysis": "Static analysis",
+    "llm_redteam": "LLM red team",
+    "llm_scanner": "LLM scanner",
+    "secret_scanner": "Secret scan",
+    "recon": "Recon",
+    "discovery": "Discovery",
+}
+
+
+def _tool_purpose(tool: dict[str, object]) -> str:
+    name = str(tool.get("name", ""))
+    if name in _TOOL_PURPOSE:
+        return _TOOL_PURPOSE[name]
+    return _CATEGORY_PURPOSE.get(str(tool.get("category") or ""), str(tool.get("category") or ""))
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     snapshot = check_tools(args.tools)
     if args.write_lock:
@@ -94,12 +128,36 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if args.json:
         print(_json(snapshot))
         return 0
+    print("BugBounty Environment Check")
+    print()
     print(f"[OK] Python {snapshot['python']}")
     print(f"[OK] Platform {snapshot['platform']}")
     for tool in snapshot["tools"]:
         label = "OK" if tool["available"] else "WARN"
         detail = tool["version"] or tool["path"] or "not installed"
         print(f"[{label}] {tool['name']} {detail}")
+    # The internal offline pipeline (testcase suites, judge, reproducer,
+    # report) needs no external tool, so core readiness never depends on
+    # them (§17 critical vs optional). External scanners are optional
+    # capabilities that degrade gracefully when missing.
+    print()
+    print("Core pipeline ready.")
+    missing = [t["name"] for t in snapshot["tools"] if not t["available"]]
+    if missing:
+        print(f"Optional tools missing (capabilities degraded): {', '.join(missing)}")
+    return 0
+
+
+def cmd_tools(args: argparse.Namespace) -> int:
+    snapshot = check_tools(args.tools)
+    if args.json:
+        print(_json(snapshot))
+        return 0
+    print(f"{'Tool':<15} {'Status':<11} Purpose")
+    print(f"{'-' * 14:<15} {'-' * 10:<11} {'-' * 7}")
+    for tool in snapshot["tools"]:
+        status = "Ready" if tool["available"] else "Missing"
+        print(f"{tool['name']:<15} {status:<11} {_tool_purpose(tool)}")
     return 0
 
 
@@ -632,6 +690,11 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--write-lock", action="store_true", help="Write tool_versions.lock.yaml")
     doctor.add_argument("--lockfile", type=Path, default=Path("tool_versions.lock.yaml"))
     doctor.set_defaults(func=cmd_doctor)
+
+    tools_cmd = sub.add_parser("tools", help="List supported external tools and their status/purpose")
+    tools_cmd.add_argument("--tools", type=Path, default=DEFAULT_TOOLS)
+    tools_cmd.add_argument("--json", action="store_true", help="Print machine-readable tool status")
+    tools_cmd.set_defaults(func=cmd_tools)
 
     fingerprint = sub.add_parser("fingerprint", help="Create a reproducibility fingerprint")
     fingerprint.add_argument("--target-build", default="local")

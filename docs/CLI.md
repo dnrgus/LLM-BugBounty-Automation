@@ -33,6 +33,13 @@ Check local runtime and optional tools
 - `--write-lock` — Write tool_versions.lock.yaml
 - `--lockfile` (default: `tool_versions.lock.yaml`)
 
+### `tools`
+
+List supported external tools and their status/purpose
+
+- `--tools` (default: `config/tools.yaml`)
+- `--json` — Print machine-readable tool status
+
 ### `fingerprint`
 
 Create a reproducibility fingerprint
