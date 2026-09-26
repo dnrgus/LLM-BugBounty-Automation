@@ -633,6 +633,7 @@ async def run_live_scan_pipeline(
     pack_budget_requests: int | None = None,
     external_scan_inputs: dict[str, Path | str | None] | None = None,
     scan_options: "ExternalScanOptions | None" = None,
+    output_dir: Path | str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     """P3.1-1 (roadmap v3.1.0 Operational Pipeline): `scan <url>`'s LIVE
@@ -717,11 +718,23 @@ async def run_live_scan_pipeline(
 
     clusters = _cluster_and_report(combined_run, reportable_findings, reports)
 
+    results_info = None
+    if output_dir is not None:
+        from reporting.results import write_scan_results
+
+        results_info = write_scan_results(
+            Path(output_dir),
+            reportable_findings,
+            store,
+            {"target": url, "profile": profile.name, "run_id": combined_run.id},
+        )
+
     return {
         "mode": "live",
         "url": url,
         "profile": profile.name,
         "param_endpoints": list(param_endpoints),
+        "results": results_info,
         "discovery": discovery.to_dict(),
         "classification": [candidate.to_dict() for candidate in candidates],
         "auto_profile": [result.to_dict() for result in auto_profile_results],
@@ -746,6 +759,7 @@ async def run_hybrid_scan_pipeline(
     pack_target: str | None = None,
     pack_target_config: Path | str | None = None,
     auth_context_available: bool = False,
+    output_dir: Path | str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     """P3.3-4 (roadmap v3.3.0 Static -> Dynamic Validation): `scan <url>
@@ -829,9 +843,18 @@ async def run_hybrid_scan_pipeline(
     for item in source_items:
         static_by_asset_type[item.asset_type] = static_by_asset_type.get(item.asset_type, 0) + 1
 
+    results_info = None
+    if output_dir is not None:
+        from reporting.results import write_scan_results
+
+        results_info = write_scan_results(
+            Path(output_dir), reportable, store, {"target": url, "profile": profile.name, "run_id": combined_run.id}
+        )
+
     return {
         "mode": "hybrid",
         "url": url,
+        "results": results_info,
         "source_root": str(_ingestion.root),
         "static_findings": {
             "total": len(source_items),

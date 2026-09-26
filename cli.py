@@ -56,7 +56,7 @@ from scenario.executor import run_scenario
 from scenario.finding import promote_scenario_result
 from scenario.loader import load_scenarios
 from source.audit import audit_source, collect_source_items
-from core.scan_context import AuthContext
+from core.scan_context import AuthContext, ScanContext
 from scope.auto import build_auto_scope
 from scope.policy import PolicyEngine
 from tools.runner import ExternalScanOptions
@@ -579,6 +579,15 @@ def _auth_from_args(args: argparse.Namespace) -> AuthContext:
     return AuthContext(token=token, headers=headers)
 
 
+def _scan_output_dir(args: argparse.Namespace) -> Path:
+    """Where a scan's results directory goes (§14). --output wins; otherwise
+    a timestamped folder under ./BugBounty-Results derived from the target."""
+    explicit = getattr(args, "output", None)
+    if explicit is not None:
+        return Path(explicit)
+    return ScanContext.create(target=args.url, source_path=args.source).output_dir
+
+
 def _scan_options_from_args(args: argparse.Namespace) -> ExternalScanOptions:
     auth = _auth_from_args(args)
     return ExternalScanOptions(
@@ -631,9 +640,14 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 pack_target=args.pack_target,
                 pack_target_config=args.pack_target_config,
                 auth_context_available=args.auth_context,
+                output_dir=_scan_output_dir(args),
             )
         )
         print(_json(result))
+        if result.get("results"):
+            from reporting.results import render_console_summary
+
+            print(render_console_summary(result["results"]), file=sys.stderr)
         return 0
 
     if args.url:
@@ -657,9 +671,14 @@ def cmd_scan(args: argparse.Namespace) -> int:
                     "trufflehog": args.trufflehog_results,
                 },
                 scan_options=_scan_options_from_args(args),
+                output_dir=_scan_output_dir(args),
             )
         )
         print(_json(result))
+        if result.get("results"):
+            from reporting.results import render_console_summary
+
+            print(render_console_summary(result["results"]), file=sys.stderr)
         return 0
 
     recon_inputs = {
@@ -1054,6 +1073,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--full-templates", action="store_true",
         help="With DAST, also run the full nuclei template set (slower, broader) instead of "
         "only the fast fuzzing templates.",
+    )
+    scan.add_argument(
+        "--output", "-o", type=Path, default=None,
+        help="Results directory. Default: a timestamped folder under ./BugBounty-Results/.",
     )
     scan.set_defaults(nuclei_dast=True)
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)

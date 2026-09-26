@@ -23,3 +23,6 @@ reports/ci_validation/
 *.sqlite3
 tool_versions.lock.yaml
 
+
+# WP-08: local scan results output (never committed)
+BugBounty-Results/
