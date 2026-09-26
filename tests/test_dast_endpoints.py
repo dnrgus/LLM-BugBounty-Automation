@@ -40,6 +40,29 @@ def test_collect_param_endpoints_keeps_only_in_scope_query_urls() -> None:
     ]
 
 
+def test_collect_param_endpoints_includes_scope_valid_seeds() -> None:
+    policy = _local_policy()
+    discovery = DiscoveryResult(base_url="http://127.0.0.1:3000", fetched_urls=[], items=[])
+    seeds = [
+        "http://127.0.0.1:3000/rest/products/search?q=test",  # in scope, kept
+        "http://127.0.0.1:3000/rest/no-query",                # seed w/o query still kept
+        "https://evil.example.com/x?q=1",                     # out of scope, dropped
+    ]
+    endpoints = collect_param_endpoints(discovery, policy, seeds=seeds)
+    assert endpoints == [
+        "http://127.0.0.1:3000/rest/products/search?q=test",
+        "http://127.0.0.1:3000/rest/no-query",
+    ]
+
+
+def test_seeds_come_before_discovered_and_dedupe() -> None:
+    policy = _local_policy()
+    shared = "http://127.0.0.1:3000/rest/products/search?q=test"
+    discovery = DiscoveryResult(base_url="http://127.0.0.1:3000", fetched_urls=[shared], items=[])
+    endpoints = collect_param_endpoints(discovery, policy, seeds=[shared])
+    assert endpoints == [shared]  # deduped, single entry
+
+
 def test_dast_pack_runs_nuclei_against_the_param_endpoint_list(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

@@ -267,6 +267,8 @@ LIVE MODE: `scan <url>` discovers/classifies/selects/runs packs end-to-end (P3.1
 - `--no-dast` (default: `True`) — Disable nuclei DAST parameter fuzzing (on by default for live URL scans).
 - `--full-templates` — With DAST, also run the full nuclei template set (slower, broader) instead of only the fast fuzzing templates.
 - `--output, -o` — Results directory. Default: a timestamped folder under ./BugBounty-Results/.
+- `--param-endpoint` — Parameterized URL to DAST-fuzz (e.g. http://host/search?q=x); repeatable. Scope-validated. Use to reach endpoints the passive crawler can't (e.g. SPA APIs).
+- `--endpoints-file` — File of parameterized URLs (one per line, # comments) to DAST-fuzz.
 - `--quiet` — Suppress the [n/6] progress lines on stderr.
 - `--testcases` (default: `testcase/suites/basic.yaml`)
 - `--db` (default: `runs/scan.sqlite`)

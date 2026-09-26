@@ -635,6 +635,7 @@ async def run_live_scan_pipeline(
     external_scan_inputs: dict[str, Path | str | None] | None = None,
     scan_options: "ExternalScanOptions | None" = None,
     output_dir: Path | str | None = None,
+    seed_param_endpoints: "list[str] | None" = None,
     progress: bool = False,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
@@ -670,7 +671,11 @@ async def run_live_scan_pipeline(
 
     # WP-06: reuse discovery's parameterized endpoints for nuclei DAST
     # fuzzing instead of re-crawling (§8), only when DAST is enabled.
-    param_endpoints = collect_param_endpoints(discovery, policy) if scan_options.nuclei_dast else []
+    param_endpoints = (
+        collect_param_endpoints(discovery, policy, seeds=seed_param_endpoints or [])
+        if scan_options.nuclei_dast
+        else []
+    )
     scan_options = replace(scan_options, param_endpoints=tuple(param_endpoints))
 
     auto_profile_results = (

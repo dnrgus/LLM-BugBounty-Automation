@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 from pathlib import Path
+from urllib.parse import urljoin
 
 import yaml
 
@@ -588,6 +589,22 @@ def _scan_output_dir(args: argparse.Namespace) -> Path:
     return ScanContext.create(target=args.url, source_path=args.source).output_dir
 
 
+def _seed_param_endpoints(args: argparse.Namespace) -> list[str]:
+    """Operator-supplied parameterized endpoints to DAST-fuzz, from
+    --param-endpoint (repeatable) and --endpoints-file (one URL per line).
+    They are still scope-validated downstream (§13)."""
+    raw: list[str] = list(getattr(args, "param_endpoint", None) or [])
+    endpoints_file = getattr(args, "endpoints_file", None)
+    if endpoints_file is not None:
+        for line in Path(endpoints_file).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                raw.append(line)
+    # Allow relative paths (e.g. "/search?q=x") by resolving against the target.
+    base = args.url or ""
+    return [item if "://" in item else urljoin(base, item) for item in raw]
+
+
 def _scan_options_from_args(args: argparse.Namespace) -> ExternalScanOptions:
     auth = _auth_from_args(args)
     return ExternalScanOptions(
@@ -672,6 +689,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 },
                 scan_options=_scan_options_from_args(args),
                 output_dir=_scan_output_dir(args),
+                seed_param_endpoints=_seed_param_endpoints(args),
                 progress=not getattr(args, "quiet", False),
             )
         )
@@ -1078,6 +1096,15 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument(
         "--output", "-o", type=Path, default=None,
         help="Results directory. Default: a timestamped folder under ./BugBounty-Results/.",
+    )
+    scan.add_argument(
+        "--param-endpoint", action="append", default=None, metavar="URL",
+        help="Parameterized URL to DAST-fuzz (e.g. http://host/search?q=x); repeatable. "
+        "Scope-validated. Use to reach endpoints the passive crawler can't (e.g. SPA APIs).",
+    )
+    scan.add_argument(
+        "--endpoints-file", type=Path, default=None,
+        help="File of parameterized URLs (one per line, # comments) to DAST-fuzz.",
     )
     scan.add_argument(
         "--quiet", action="store_true", help="Suppress the [n/6] progress lines on stderr.",

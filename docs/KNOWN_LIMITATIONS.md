@@ -18,7 +18,7 @@ Consolidated list; each item is either a deliberate scope boundary or a measured
 
 ## Live scanning (`bugbounty scan <url>`)
 - Auto-scope is generated only for loopback/private/link-local hosts; a public target requires an explicit `--scope` file (usability never invents authorization).
-- nuclei DAST fuzzes parameterized endpoints that discovery surfaced. The built-in crawler is passive (GET/HEAD, no active parameter discovery), so an endpoint like Juice Shop's `/rest/products/search?q=` is only fuzzed if it appears in-page or is provided via `--source`/hybrid mode or a richer crawler (e.g. katana input). Absent that, the DAST run has no parameters to fuzz.
+- nuclei DAST fuzzes parameterized endpoints that discovery surfaced. The built-in crawler is passive (GET/HEAD, no active parameter discovery), so an endpoint like Juice Shop's `/rest/products/search?q=` is not auto-found on a SPA. Provide such endpoints explicitly with `--param-endpoint '/rest/products/search?q=test'` (repeatable) or `--endpoints-file` (they are scope-validated, then DAST-fuzzed), or via `--source`/hybrid mode or a richer crawler. With a seed, the Juice Shop SQLi is detected end-to-end.
 - External-tool findings (nuclei/dalfox) are promoted as `candidate` and filed under `needs_review/`; they are never auto-confirmed (their severity is still preserved).
 - Default scan runs the fast nuclei `dast` template set; `--full-templates` also runs the full set (slower). Non-DAST default-template exposures (e.g. Swagger detection) only run with `--full-templates` or `--no-dast`.
 
