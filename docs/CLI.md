@@ -260,7 +260,7 @@ LIVE MODE: `scan <url>` discovers/classifies/selects/runs packs end-to-end (P3.1
 - `--auth-context` — HYBRID MODE only: an authenticated session/account is available for testing, so endpoints with a detected auth guard aren't automatically downgraded to review_only
 - `--profile` (default: `quick`)
 - `--pipeline-config` (default: `config/pipeline.yaml`)
-- `--scope` (default: `config/scope.example.yaml`)
+- `--scope` — Scope/policy YAML. Omit for a localhost/private URL to get a safe auto-scope; public URLs require this. With no URL (fixture --profile mode) defaults to the sample scope.
 - `--testcases` (default: `testcase/suites/basic.yaml`)
 - `--db` (default: `runs/scan.sqlite`)
 - `--max-pages` (default: `5`) — LIVE/HYBRID MODE only: max pages for the discovery crawl

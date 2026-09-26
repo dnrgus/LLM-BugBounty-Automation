@@ -55,6 +55,7 @@ from scenario.executor import run_scenario
 from scenario.finding import promote_scenario_result
 from scenario.loader import load_scenarios
 from source.audit import audit_source, collect_source_items
+from scope.auto import build_auto_scope
 from scope.policy import PolicyEngine
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
@@ -539,6 +540,29 @@ def cmd_recon(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_scan_policy(args: argparse.Namespace) -> PolicyEngine:
+    """WP-04: pick the scope for a scan.
+
+    Explicit --scope always wins. Otherwise, a URL target on a
+    loopback/private host gets a conservative auto-scope so a local lab
+    (e.g. Juice Shop on 127.0.0.1) needs no hand-written YAML; a public
+    host raises (ScopeNotAutoAllowedError -> exit 3) demanding an explicit
+    --scope, so usability never invents authorization (§4, §32). With no
+    URL (the fixture-driven --profile path) the historical DEFAULT_SCOPE is
+    used, preserving existing behavior.
+    """
+    if args.scope is not None:
+        return PolicyEngine.from_yaml(args.scope)
+    if args.url:
+        config = build_auto_scope(args.url)
+        print(
+            f"[scope] no --scope given; using auto-scope for local target {args.url}",
+            file=sys.stderr,
+        )
+        return PolicyEngine(config)
+    return PolicyEngine.from_yaml(DEFAULT_SCOPE)
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     if args.source and not args.url:
         # P4.5 WP-03: SOURCE-only `scan --source <path>` writes the common
@@ -561,7 +585,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         return 0
 
     profile = load_profile(args.profile, args.pipeline_config)
-    policy = PolicyEngine.from_yaml(args.scope)
+    policy = _resolve_scan_policy(args)
     testcases = load_testcases(args.testcases)
     store = SQLiteStore(args.db)
 
@@ -977,7 +1001,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--profile", choices=["quick", "llm", "agent", "rag", "web", "full"], default="quick")
     scan.add_argument("--pipeline-config", type=Path, default=DEFAULT_PIPELINE_CONFIG)
-    scan.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    scan.add_argument(
+        "--scope", type=Path, default=None,
+        help="Scope/policy YAML. Omit for a localhost/private URL to get a safe auto-scope; "
+        "public URLs require this. With no URL (fixture --profile mode) defaults to the sample scope.",
+    )
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))
     scan.add_argument("--max-pages", type=int, default=5, help="LIVE/HYBRID MODE only: max pages for the discovery crawl")
