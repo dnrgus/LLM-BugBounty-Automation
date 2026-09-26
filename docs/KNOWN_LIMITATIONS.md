@@ -16,6 +16,12 @@ Consolidated list; each item is either a deliberate scope boundary or a measured
 - Caps: `max_depth=4`, `max_nodes=500`, `time_budget_s=5` per audit; hitting one is reported in `interprocedural.truncated`.
 - Files that make the parser recurse too deeply are skipped per file and listed in `interprocedural.file_errors`.
 
+## Live scanning (`bugbounty scan <url>`)
+- Auto-scope is generated only for loopback/private/link-local hosts; a public target requires an explicit `--scope` file (usability never invents authorization).
+- nuclei DAST fuzzes parameterized endpoints that discovery surfaced. The built-in crawler is passive (GET/HEAD, no active parameter discovery), so an endpoint like Juice Shop's `/rest/products/search?q=` is only fuzzed if it appears in-page or is provided via `--source`/hybrid mode or a richer crawler (e.g. katana input). Absent that, the DAST run has no parameters to fuzz.
+- External-tool findings (nuclei/dalfox) are promoted as `candidate` and filed under `needs_review/`; they are never auto-confirmed (their severity is still preserved).
+- Default scan runs the fast nuclei `dast` template set; `--full-templates` also runs the full set (slower). Non-DAST default-template exposures (e.g. Swagger detection) only run with `--full-templates` or `--no-dast`.
+
 ## Judge
 - The semantic judge is opt-in and wired into `sample-run` only; it can downgrade to `needs_review`, never confirm.
 

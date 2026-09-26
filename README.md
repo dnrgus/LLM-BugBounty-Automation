@@ -6,6 +6,47 @@
 
 이 저장소의 기본 원칙은 **Scope first**, **Policy aware**, **Evidence driven**, **Reproducible**입니다. 허가되지 않은 대상이나 프로그램 정책에서 금지한 행위는 실행 전에 차단하는 것을 목표로 합니다.
 
+## 빠른 시작 (`bugbounty` CLI)
+
+```bash
+pip install -e .          # 'bugbounty' 명령 설치 (기존 `python main.py`도 그대로 동작)
+
+bugbounty doctor          # 환경/도구 점검 (core 준비 여부 + 선택 도구 상태)
+bugbounty tools           # 지원 외부 도구와 상태/용도
+
+# 웹 스캔 (로컬/사설 대상은 scope 자동 생성; 공개 대상은 --scope 필요)
+bugbounty scan http://127.0.0.1:3000
+
+# 소스코드 정적 분석
+bugbounty scan --source ./project
+
+# 웹 + 소스 통합(하이브리드)
+bugbounty scan http://127.0.0.1:3000 --source ./project
+
+# 인증이 필요한 대상 (토큰 1회 입력 → 모든 스캐너가 재사용, 결과에는 redact)
+bugbounty scan http://127.0.0.1:3000 --auth-token "$TOKEN"
+```
+
+스캔이 끝나면 위험도별로 정리된 결과가 `./BugBounty-Results/<target>_<timestamp>/`에 저장되고
+(`--output`으로 변경), 콘솔에 요약이 출력됩니다:
+
+```text
+Scan complete.
+
+Critical: 0
+High    : 0
+...
+Needs Review : 2  (critical: 1, info: 1)
+
+Results saved to:
+./BugBounty-Results/127.0.0.1_3000_2026-09-26_103000
+```
+
+필요한 외부 도구(nuclei/semgrep/dalfox 등)는 설치되어 있으면 파이프라인이 자동 선택·실행하고,
+없으면 해당 단계만 건너뛰고 계속 진행합니다(graceful degradation). 고급 사용자는
+`--nuclei-results` 등으로 외부에서 만든 결과를 직접 주입할 수도 있습니다. 자세한 명령은
+[`docs/CLI.md`](docs/CLI.md), 제약 사항은 [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md)를 참고하세요.
+
 현재 구현된 범위:
 
 - `doctor`, `fingerprint`, `validate-scope`, `sample-run` CLI
