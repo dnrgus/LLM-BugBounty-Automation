@@ -672,6 +672,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 },
                 scan_options=_scan_options_from_args(args),
                 output_dir=_scan_output_dir(args),
+                progress=not getattr(args, "quiet", False),
             )
         )
         print(_json(result))
@@ -1077,6 +1078,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument(
         "--output", "-o", type=Path, default=None,
         help="Results directory. Default: a timestamped folder under ./BugBounty-Results/.",
+    )
+    scan.add_argument(
+        "--quiet", action="store_true", help="Suppress the [n/6] progress lines on stderr.",
     )
     scan.set_defaults(nuclei_dast=True)
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)

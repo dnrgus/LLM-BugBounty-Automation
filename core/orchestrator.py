@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -634,6 +635,7 @@ async def run_live_scan_pipeline(
     external_scan_inputs: dict[str, Path | str | None] | None = None,
     scan_options: "ExternalScanOptions | None" = None,
     output_dir: Path | str | None = None,
+    progress: bool = False,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     """P3.1-1 (roadmap v3.1.0 Operational Pipeline): `scan <url>`'s LIVE
@@ -655,9 +657,15 @@ async def run_live_scan_pipeline(
     from packs.runner import run_selected_packs
     from tools.runner import ExternalScanOptions
 
+    def _step(n: int, message: str) -> None:
+        if progress:
+            print(f"[{n}/6] {message}", file=sys.stderr, flush=True)
+
     store.initialize()
     scan_options = scan_options or ExternalScanOptions()
+    _step(1, "Discovering endpoints...")
     discovery = await discover_target(url, policy, max_pages=max_pages, transport=transport)
+    _step(2, "Classifying attack surface...")
     candidates = classify_items(discovery.items)
 
     # WP-06: reuse discovery's parameterized endpoints for nuclei DAST
@@ -669,10 +677,12 @@ async def run_live_scan_pipeline(
         await auto_profile_candidates(candidates, policy, store, transport=transport) if auto_profile else []
     )
 
+    _step(3, "Selecting attack packs...")
     budget = AttackBudget(max_requests=pack_budget_requests) if pack_budget_requests else None
     target_kinds = {candidate.kind for candidate in candidates}
     selections = select_packs(target_kinds, policy, budget=budget)
 
+    _step(4, "Running scanners...")
     pack_runs = await run_selected_packs(
         selections,
         testcases,
@@ -704,6 +714,7 @@ async def run_live_scan_pipeline(
     # first-class candidate Findings too, instead of leaving them as
     # opaque JSON inside pack_runs -- every finding scan <url> surfaces
     # now has a real confirmed/unstable/rejected/candidate status.
+    _step(5, "Normalizing and verifying findings...")
     external_tool_findings = promote_external_tool_findings(pack_runs, combined_run.id, store)
 
     reportable_findings = reportable_testcase_findings + external_tool_findings
@@ -720,6 +731,7 @@ async def run_live_scan_pipeline(
 
     results_info = None
     if output_dir is not None:
+        _step(6, "Writing reports...")
         from reporting.results import write_scan_results
 
         results_info = write_scan_results(
