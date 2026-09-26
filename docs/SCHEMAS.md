@@ -21,7 +21,7 @@ Source of truth: `core/contract.py` (`SCHEMA_VERSIONS`, `FINDING_STATES`, `REQUI
 ## Evidence layout
 
 ```
-evidence/
+results/BugBounty-Results/_internal/evidence/
   raw/<run_id>_<name>.json          # original payload, never overwritten
   sanitized/<run_id>_<name>.json    # redacted copy (bearer tokens, API keys, cookies, canaries, emails, AWS keys, private keys)
   sanitized/<run_id>_<name>.redaction.log     # what was redacted (pattern name + count, never the values)

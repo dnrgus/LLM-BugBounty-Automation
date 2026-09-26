@@ -27,7 +27,7 @@ bugbounty scan http://127.0.0.1:3000 --source ./project
 bugbounty scan http://127.0.0.1:3000 --auth-token "$TOKEN"
 ```
 
-스캔이 끝나면 위험도별로 정리된 결과가 `./BugBounty-Results/<target>_<timestamp>/`에 저장되고
+스캔이 끝나면 위험도별로 정리된 결과가 `./results/BugBounty-Results/<target>_<timestamp>/`에 저장되고
 (`--output`으로 변경), 콘솔에 요약이 출력됩니다:
 
 ```text
@@ -39,7 +39,7 @@ High    : 0
 Needs Review : 2  (critical: 1, info: 1)
 
 Results saved to:
-./BugBounty-Results/127.0.0.1_3000_2026-09-26_103000
+./results/BugBounty-Results/127.0.0.1_3000_2026-09-26_103000
 ```
 
 필요한 외부 도구(nuclei/semgrep/dalfox 등)는 설치되어 있으면 파이프라인이 자동 선택·실행하고,
@@ -175,13 +175,17 @@ pytest
 ## 저장소 구조
 
 ```text
-config/        파이프라인, 모델, 도구, 로깅, Scope 예시 (config/scope.ci.yaml은 CI LIVE/HYBRID smoke 전용)
+main.py        실행 진입점 (`python main.py ...` = `bugbounty ...`, 구현은 cli.py)
+results/       모든 실행 결과와 리포트 (results/BugBounty-Results/, git 제외)
+config/        파이프라인, 도구, Scope/Target/Auth 예시 (config/scope.ci.yaml은 CI LIVE/HYBRID smoke 전용)
 core/          orchestrator(scan/live/hybrid pipeline), checkpoint/resume, cancel, 데이터 모델, fingerprint
 scope/         Scope와 Program Policy 검사
 targets/       Target Adapter 계약과 Fake Target (+ universal/websocket/browser plugin)
-adapters/      LLM/Recon/Discovery 외부 도구 결과 정규화 어댑터
 attacks/       Mutation Engine과 PyRIT Adaptive Planner
-tools/         외부 바이너리(nuclei/dalfox) 실제 실행 계층 (Policy/Scope 게이트, shell=False)
+tools/         외부 도구 연동: runner.py/nuclei.py/dalfox.py/trufflehog.py 실제 실행 계층(Policy/Scope 게이트,
+               shell=False) + adapters/ 결과 정규화(scanner: nuclei/dalfox, discovery: katana/ffuf,
+               recon: httpx/subfinder, secrets: trufflehog, llm: garak/promptfoo/pyrit)
+               trufflehog.py 실행 정의는 planned (기본 scan에 아직 미연결)
 recon/         Subfinder/httpx/Katana/ffuf 기반 Asset/Endpoint 파이프라인, AI Endpoint Classifier
 live/          LIVE MODE discovery, 분류, auto-profile
 source/        SOURCE MODE static analysis -- parsers/(Python AST, JS/TS tree-sitter), frameworks/
@@ -201,6 +205,7 @@ judges/        rule, canary, regex, ensemble judge
 storage/       SQLite 저장소, run_state(resume), artifact helper
 reporting/     Evidence redaction, integrity manifest, report 생성
 tests/         단위 및 통합 테스트
+docs/          CLI/스키마/지원 매트릭스 문서, plans/ 설계·구현 계획서 PDF
 ```
 
 ## 안전 모델
@@ -344,13 +349,18 @@ python main.py scan https://target.example.com --source ./target-source \
 
 ## 산출물
 
-`sample-run`은 다음 산출물을 로컬에 생성합니다.
+모든 실행 결과는 `results/BugBounty-Results/` 한 곳에 저장됩니다 (경로 정의: `core/paths.py`,
+`BUGBOUNTY_RESULTS_DIR` 환경변수로 변경 가능).
 
-- `evidence/raw/`: 원본 요청/응답 Evidence
-- `evidence/sanitized/`: redaction 적용 Evidence와 redaction log
-- `reports/shareable/`: 제출용 Markdown/JSON report, `{run_id}_root_cause_clusters.json` (findings가 있을 때만 생성)
+- `<target>_<timestamp>/`: `bugbounty scan` 1회당 결과 폴더 (위험도별 정리, 사용자가 보는 리포트)
+- `_internal/runs/`: SQLite run store, scan artifact
+- `_internal/evidence/raw/`: 원본 요청/응답 Evidence
+- `_internal/evidence/sanitized/`: redaction 적용 Evidence와 redaction log
+- `_internal/reports/shareable/`: 제출용 Markdown/JSON report, `{run_id}_root_cause_clusters.json` (findings가 있을 때만 생성)
+- `_internal/reports/validation/`: `report` 명령 출력
+- `_internal/tool_versions.lock.yaml`: `doctor --write-lock` 출력
 
-위 경로는 기본적으로 `.gitignore` 대상입니다.
+`results/`는 `.gitignore` 대상입니다.
 
 ## v0.1.0-mvp1 Release Gate
 
@@ -570,8 +580,8 @@ v4.3.0 절의 기존 목록도 대부분 계속 유효하며, 이번에 새로 �
 ```bash
 pytest   # 640 passed
 ruff check .
-python main.py scan --source tests/fixtures/source/rest_api_app --artifact runs/artifacts/scan.json
-python main.py validate --artifact runs/artifacts/scan.json --base-url https://<허가된 대상> \
+python main.py scan --source tests/fixtures/source/rest_api_app --artifact results/BugBounty-Results/_internal/runs/artifacts/scan.json
+python main.py validate --artifact results/BugBounty-Results/_internal/runs/artifacts/scan.json --base-url https://<허가된 대상> \
     --auth-contexts config/my-auth.yaml --key-field owner
 python main.py reproduce <finding-id> --auth-contexts config/my-auth.yaml --attempts 3
 python main.py report --run-id <validate run_id>
