@@ -109,6 +109,48 @@ def test_promote_external_tool_findings_evidence_is_sanitized_of_planted_secrets
         assert "AKIAABCDEFGHIJKLMNOP" in raw_text  # raw evidence keeps the original for authorized review
 
 
+def test_promote_external_tool_findings_preserves_tool_reported_severity(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "ext.sqlite")
+    store.initialize()
+    critical = {**_NUCLEI_ITEM, "title": "Error based SQL Injection", "metadata": {"severity": "critical", "raw": {}}}
+    info = {**_NUCLEI_ITEM, "title": "Public Swagger API", "metadata": {"severity": "info", "raw": {}}}
+    pack_runs = [
+        PackRunResult(pack_id="web_scan", tool_id="nuclei", status="ran", detail="", summary={"findings": [critical, info]}),
+    ]
+
+    findings = promote_external_tool_findings(pack_runs, "run_1", store)
+
+    by_title = {f.title: f for f in findings}
+    assert by_title["Error based SQL Injection"].severity == "critical"
+    assert by_title["Public Swagger API"].severity == "info"
+
+
+def test_promote_external_tool_findings_falls_back_to_medium_when_severity_missing_or_invalid(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "ext.sqlite")
+    store.initialize()
+    no_meta = {**_NUCLEI_ITEM, "metadata": {"raw": {}}}  # no severity key
+    bogus = {**_NUCLEI_ITEM, "title": "Bogus sev", "metadata": {"severity": "spicy", "raw": {}}}
+    pack_runs = [
+        PackRunResult(pack_id="web_scan", tool_id="nuclei", status="ran", detail="", summary={"findings": [no_meta, bogus]}),
+    ]
+
+    findings = promote_external_tool_findings(pack_runs, "run_1", store)
+
+    assert all(f.severity == "medium" for f in findings)
+
+
+def test_promote_external_tool_findings_marks_verified_secrets_high(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "ext.sqlite")
+    store.initialize()
+    pack_runs = [
+        PackRunResult(pack_id="secret_scan", tool_id="trufflehog", status="ran", detail="", summary={"findings": [_SECRET_ITEM]}),
+    ]
+
+    findings = promote_external_tool_findings(pack_runs, "run_1", store)
+
+    assert findings[0].severity == "high"
+
+
 def test_run_reproduce_finding_reports_external_tool_findings_as_unsupported_instead_of_crashing(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "ext.sqlite")
     store.initialize()

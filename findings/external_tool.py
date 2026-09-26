@@ -37,16 +37,35 @@ def promote_external_tool_findings(
     return findings
 
 
+_VALID_SEVERITIES = {"info", "low", "medium", "high", "critical"}
+
+
+def _severity_of(item: dict[str, object]) -> str:
+    """Preserve the tool-reported severity that the scanner adapters
+    (adapters/scanner/nuclei.py, dalfox.py) already captured into
+    metadata.severity. Without this, a nuclei "critical" (e.g. an
+    error-based SQLi) and an "info" exposure both collapsed to a
+    hardcoded "medium", losing the triage signal. Unknown/missing
+    values fall back to "medium" as before.
+    """
+    metadata = item.get("metadata")
+    raw = metadata.get("severity") if isinstance(metadata, dict) else None
+    severity = str(raw).lower() if raw is not None else ""
+    return severity if severity in _VALID_SEVERITIES else "medium"
+
+
 def _promote_one(tool_id: str, item: dict[str, object], run_id: str, store: SQLiteStore) -> Finding:
     is_secret = "redacted_secret" in item
     if is_secret:
         title = f"{item.get('detector', 'unknown')} secret exposure ({tool_id})"
         category = "secret_exposure"
         confidence = 1.0 if item.get("verified") else 0.5
+        severity = "high"
     else:
         title = str(item.get("title") or f"{tool_id} finding")
         category = str(item.get("category") or "automated_scanning")
         confidence = float(item.get("detector_score") or 0.0)
+        severity = _severity_of(item)
 
     evidence_bundle = write_evidence_bundle(
         Path("evidence/raw"),
@@ -65,7 +84,7 @@ def _promote_one(tool_id: str, item: dict[str, object], run_id: str, store: SQLi
         category=category,
         status=FindingStatus.CANDIDATE,
         confidence=confidence,
-        severity="medium",
+        severity=severity,
         evidence_ref=evidence.id,
         reproduction_spec={"type": "external_tool", "tool_id": tool_id, "raw": item},
     )
