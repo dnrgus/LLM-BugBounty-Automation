@@ -4,7 +4,7 @@ and the console summary block."""
 import json
 from pathlib import Path
 
-from core.models import Evidence, Finding, FindingStatus
+from core.models import Finding, FindingStatus
 from reporting.results import render_console_summary, write_scan_results
 from storage.sqlite import SQLiteStore
 

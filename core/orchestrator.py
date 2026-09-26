@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -61,6 +62,10 @@ from testcase.coverage import build_coverage_matrix, coverage_summary
 from testcase.selector import select_executable_testcases
 from testcase.schema import Testcase
 from validation.planner import generate_validation_plans
+
+if TYPE_CHECKING:
+    # Runtime import stays local in run_live_scan_pipeline (circular via packs.runner).
+    from tools.runner import ExternalScanOptions
 
 _MAX_CONSECUTIVE_TARGET_ERRORS = 3
 
