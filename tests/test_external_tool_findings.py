@@ -139,6 +139,33 @@ def test_promote_external_tool_findings_falls_back_to_medium_when_severity_missi
     assert all(f.severity == "medium" for f in findings)
 
 
+def test_promote_external_tool_findings_records_provenance_fields(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "ext.sqlite")
+    store.initialize()
+    item = {
+        **_NUCLEI_ITEM,
+        "title": "Error based SQL Injection",
+        "category": "sqli",
+        "endpoint": "http://127.0.0.1:3000/rest/products/search?q=x",
+        "metadata": {"severity": "critical", "raw": {"fuzzing_method": "GET"}},
+    }
+    pack_runs = [PackRunResult(pack_id="web_scan", tool_id="nuclei", status="ran", detail="", summary={"findings": [item]})]
+
+    finding = promote_external_tool_findings(pack_runs, "run_1", store)[0]
+
+    assert finding.source_tool == "nuclei"
+    assert finding.endpoint == "http://127.0.0.1:3000/rest/products/search?q=x"
+    assert finding.method == "GET"
+    assert finding.external_severity == "critical"
+    assert finding.severity == "critical"
+
+    # Survives a DB round-trip (persisted, not just in-memory).
+    loaded = {f.id: f for f in store.list_findings(["run_1"])}[finding.id]
+    assert loaded.source_tool == "nuclei"
+    assert loaded.endpoint == finding.endpoint
+    assert loaded.external_severity == "critical"
+
+
 def test_promote_external_tool_findings_marks_verified_secrets_high(tmp_path: Path) -> None:
     store = SQLiteStore(tmp_path / "ext.sqlite")
     store.initialize()

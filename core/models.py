@@ -245,6 +245,15 @@ class Finding:
     static_candidate_id: str | None = None
     validation_task_ids: list[str] = field(default_factory=list)
     validation_status: str | None = None
+    # WP-07 (§9/§10): first-class provenance for a normalized finding so a
+    # report/CLI can read them without digging through reproduction_spec.
+    # external_severity keeps the scanner's own rating distinct from this
+    # pipeline's final severity (they may diverge). All optional/default-
+    # only, so every existing Finding(...) call site is unchanged.
+    source_tool: str | None = None
+    endpoint: str | None = None
+    method: str | None = None
+    external_severity: str | None = None
 
 
 @dataclass(frozen=True)

@@ -199,7 +199,11 @@ class SQLiteStore:
                   origin text,
                   static_candidate_id text,
                   validation_task_ids text,
-                  validation_status text
+                  validation_status text,
+                  source_tool text,
+                  endpoint text,
+                  method text,
+                  external_severity text
                 );
                 create table if not exists evidence (
                   id text primary key,
@@ -430,7 +434,8 @@ class SQLiteStore:
                 )
                 return
             if "origin" not in columns:
-                for key in ("origin", "static_candidate_id", "validation_task_ids", "validation_status"):
+                for key in ("origin", "static_candidate_id", "validation_task_ids", "validation_status",
+                            "source_tool", "endpoint", "method", "external_severity"):
                     data.pop(key, None)
                 conn.execute(
                     "insert into findings(id, run_id, testcase_id, title, category, status, confidence, severity, evidence_ref, reproduction_spec) "
@@ -438,9 +443,21 @@ class SQLiteStore:
                     data,
                 )
                 return
+            if "source_tool" not in columns:
+                for key in ("source_tool", "endpoint", "method", "external_severity"):
+                    data.pop(key, None)
+                conn.execute(
+                    "insert into findings(id, run_id, testcase_id, title, category, status, confidence, severity, evidence_ref, "
+                    "reproduction_spec, origin, static_candidate_id, validation_task_ids, validation_status) "
+                    "values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, :evidence_ref, "
+                    ":reproduction_spec, :origin, :static_candidate_id, :validation_task_ids, :validation_status)",
+                    data,
+                )
+                return
             conn.execute(
                 "insert into findings values (:id, :run_id, :testcase_id, :title, :category, :status, :confidence, :severity, "
-                ":evidence_ref, :reproduction_spec, :origin, :static_candidate_id, :validation_task_ids, :validation_status)",
+                ":evidence_ref, :reproduction_spec, :origin, :static_candidate_id, :validation_task_ids, :validation_status, "
+                ":source_tool, :endpoint, :method, :external_severity)",
                 data,
             )
 
@@ -469,6 +486,10 @@ class SQLiteStore:
             static_candidate_id=row["static_candidate_id"] if "static_candidate_id" in columns else None,
             validation_task_ids=validation_task_ids,
             validation_status=row["validation_status"] if "validation_status" in columns else None,
+            source_tool=row["source_tool"] if "source_tool" in columns else None,
+            endpoint=row["endpoint"] if "endpoint" in columns else None,
+            method=row["method"] if "method" in columns else None,
+            external_severity=row["external_severity"] if "external_severity" in columns else None,
         )
 
     def list_findings(self, run_ids: list[str]) -> list[Finding]:
