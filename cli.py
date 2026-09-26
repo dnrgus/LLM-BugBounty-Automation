@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import signal
 import sys
 from pathlib import Path
@@ -55,8 +56,10 @@ from scenario.executor import run_scenario
 from scenario.finding import promote_scenario_result
 from scenario.loader import load_scenarios
 from source.audit import audit_source, collect_source_items
+from core.scan_context import AuthContext
 from scope.auto import build_auto_scope
 from scope.policy import PolicyEngine
+from tools.runner import ExternalScanOptions
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
 from testcase.coverage import build_coverage_matrix, coverage_summary
@@ -563,6 +566,29 @@ def _resolve_scan_policy(args: argparse.Namespace) -> PolicyEngine:
     return PolicyEngine.from_yaml(DEFAULT_SCOPE)
 
 
+def _auth_from_args(args: argparse.Namespace) -> AuthContext:
+    """Collect --auth-token / --header (and the BUGBOUNTY_AUTH_TOKEN env
+    fallback) into one AuthContext reused by every scanner (§19)."""
+    headers: dict[str, str] = {}
+    for raw in getattr(args, "header", None) or []:
+        name, sep, value = raw.partition(":")
+        if not sep:
+            raise ValueError(f"--header must be 'Name: value', got {raw!r}")
+        headers[name.strip()] = value.strip()
+    token = getattr(args, "auth_token", None) or os.environ.get("BUGBOUNTY_AUTH_TOKEN")
+    return AuthContext(token=token, headers=headers)
+
+
+def _scan_options_from_args(args: argparse.Namespace) -> ExternalScanOptions:
+    auth = _auth_from_args(args)
+    return ExternalScanOptions(
+        auth_headers=auth.as_request_headers(),
+        tool_timeout=float(getattr(args, "tool_timeout", 600.0)),
+        nuclei_dast=getattr(args, "nuclei_dast", False),
+        full_templates=getattr(args, "full_templates", False),
+    )
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     if args.source and not args.url:
         # P4.5 WP-03: SOURCE-only `scan --source <path>` writes the common
@@ -630,6 +656,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                     "dalfox": args.dalfox_results,
                     "trufflehog": args.trufflehog_results,
                 },
+                scan_options=_scan_options_from_args(args),
             )
         )
         print(_json(result))
@@ -1005,6 +1032,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--scope", type=Path, default=None,
         help="Scope/policy YAML. Omit for a localhost/private URL to get a safe auto-scope; "
         "public URLs require this. With no URL (fixture --profile mode) defaults to the sample scope.",
+    )
+    scan.add_argument(
+        "--auth-token", default=None,
+        help="Bearer token sent as 'Authorization: Bearer ...' by every scanner. "
+        "Falls back to the BUGBOUNTY_AUTH_TOKEN env var. Redacted in output/evidence.",
+    )
+    scan.add_argument(
+        "--header", action="append", default=None, metavar="'Name: value'",
+        help="Extra request header reused by every scanner; repeatable.",
+    )
+    scan.add_argument(
+        "--tool-timeout", type=float, default=600.0,
+        help="Per-tool subprocess timeout in seconds for live scanners (default 600).",
     )
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))

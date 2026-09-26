@@ -7,7 +7,33 @@ from typing import Any, Callable
 
 from core.cancel import CancellationToken
 from core.tool_doctor import ToolStatus, check_tool, detect_version
+from reporting.sanitizer import sanitize_text
 from scope.policy import PolicyEngine
+
+
+@dataclass(frozen=True)
+class ExternalScanOptions:
+    """WP-05/06: per-scan knobs threaded to external tool execution so a
+    token is entered once and reused (§19), scans aren't cut off by a
+    too-short default (§20), and nuclei can fuzz parameters (§7).
+
+    Defaults reproduce the original behavior exactly (no auth, 120s, no
+    DAST), so any caller that doesn't pass options is unchanged.
+    """
+
+    auth_headers: dict[str, str] = field(default_factory=dict)
+    tool_timeout: float = 120.0
+    nuclei_dast: bool = False
+    full_templates: bool = False
+    param_endpoints: tuple[str, ...] = ()
+
+
+def _redact_argv(command: list[str]) -> list[str]:
+    """Mask credentials in an argv before it is stored/printed. The real
+    argv is only ever handed to the subprocess; everything persisted or
+    returned (ToolExecutionResult.command -> scan JSON on stdout, evidence)
+    goes through this so an auth header value never leaks."""
+    return [sanitize_text(arg)[0] for arg in command]
 
 
 @dataclass(frozen=True)
@@ -105,6 +131,9 @@ async def run_external_tool(
     command = tool.build_command(target)
     if not command or command[0] != tool.binary:
         raise ValueError(f"{tool.id}: build_command()[0] must be {tool.binary!r}, got {command!r}")
+    # Only the real `command` is handed to the subprocess; every result that
+    # is stored, returned or printed uses the redacted copy (WP-05).
+    safe_command = _redact_argv(command)
 
     started = time.monotonic()
     process = await asyncio.create_subprocess_exec(
@@ -122,7 +151,7 @@ async def run_external_tool(
             return ToolExecutionResult(
                 tool_id=tool.id,
                 status="timeout",
-                command=command,
+                command=safe_command,
                 detail=f"{tool.binary} exceeded {timeout_seconds}s timeout and was killed",
                 duration_seconds=time.monotonic() - started,
             )
@@ -144,14 +173,14 @@ async def run_external_tool(
                 return ToolExecutionResult(
                     tool_id=tool.id,
                     status="cancelled",
-                    command=command,
+                    command=safe_command,
                     detail=f"{tool.binary} was cancelled: {cancellation.reason}",
                     duration_seconds=time.monotonic() - started,
                 )
             return ToolExecutionResult(
                 tool_id=tool.id,
                 status="timeout",
-                command=command,
+                command=safe_command,
                 detail=f"{tool.binary} exceeded {timeout_seconds}s timeout and was killed",
                 duration_seconds=time.monotonic() - started,
             )
@@ -164,7 +193,7 @@ async def run_external_tool(
         return ToolExecutionResult(
             tool_id=tool.id,
             status="error",
-            command=command,
+            command=safe_command,
             detail=f"{tool.binary} exited {process.returncode}",
             returncode=process.returncode,
             stdout=stdout,
@@ -178,7 +207,7 @@ async def run_external_tool(
     return ToolExecutionResult(
         tool_id=tool.id,
         status="ran",
-        command=command,
+        command=safe_command,
         detail=f"parsed {len(findings)} finding(s) from a live {tool.binary} run",
         version=version,
         returncode=0,

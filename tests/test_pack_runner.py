@@ -232,7 +232,7 @@ def test_run_selected_packs_runs_nuclei_live_when_installed_and_a_live_target_ur
         normalizer=__import__("adapters.scanner.nuclei", fromlist=["NucleiAdapter"]).NucleiAdapter(),
     )
 
-    with patch("packs.runner._LIVE_EXTERNAL_TOOLS", {"nuclei": fixture_tool}):
+    with patch("packs.runner._LIVE_TOOL_FACTORIES", {"nuclei": lambda options: fixture_tool}):
         results = asyncio.run(
             run_selected_packs(
                 selections, _TESTCASES, _policy(), store,

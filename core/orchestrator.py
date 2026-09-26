@@ -632,6 +632,7 @@ async def run_live_scan_pipeline(
     pack_target_config: Path | str | None = None,
     pack_budget_requests: int | None = None,
     external_scan_inputs: dict[str, Path | str | None] | None = None,
+    scan_options: "ExternalScanOptions | None" = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     """P3.1-1 (roadmap v3.1.0 Operational Pipeline): `scan <url>`'s LIVE
@@ -648,8 +649,10 @@ async def run_live_scan_pipeline(
     # circular.
     from findings.external_tool import promote_external_tool_findings
     from packs.runner import run_selected_packs
+    from tools.runner import ExternalScanOptions
 
     store.initialize()
+    scan_options = scan_options or ExternalScanOptions()
     discovery = await discover_target(url, policy, max_pages=max_pages, transport=transport)
     candidates = classify_items(discovery.items)
 
@@ -671,6 +674,7 @@ async def run_live_scan_pipeline(
         profile=profile,
         external_scan_inputs={k: v for k, v in (external_scan_inputs or {}).items() if v is not None},
         live_target_url=url,
+        options=scan_options,
     )
 
     combined_run = Run(target_id="live_scan", policy_hash=policy.policy_hash, fingerprint=f"live_scan:{url}")
