@@ -12,7 +12,7 @@ def _parse_output(stdout: str) -> list[dict[str, Any]]:
 
 
 def _command_builder(
-    headers: dict[str, str], dast: bool, full_templates: bool
+    headers: dict[str, str], dast: bool, full_templates: bool, target_list: str | None = None
 ) -> Callable[[str], list[str]]:
     """Build a nuclei argv closure (WP-05/06).
 
@@ -22,10 +22,18 @@ def _command_builder(
     - full_templates: without it, a dast scan restricts to the fuzzing
       (dast) template set for speed; with it, the full template set also
       runs. When dast is off this flag has no effect (default template run).
+    - target_list: when set, scan every URL in this file (-l) instead of the
+      single -u target -- used to fuzz the parameterized endpoints reused
+      from discovery (§8). The -u target is still what Policy/Scope validated
+      in run_external_tool; the list only ever contains URLs discovery
+      already validated in-scope.
     """
 
     def build(target: str) -> list[str]:
-        command = ["nuclei", "-u", target, "-jsonl", "-silent"]
+        if target_list is not None:
+            command = ["nuclei", "-l", target_list, "-jsonl", "-silent"]
+        else:
+            command = ["nuclei", "-u", target, "-jsonl", "-silent"]
         for name, value in headers.items():
             command += ["-H", f"{name}: {value}"]
         if dast:
@@ -37,12 +45,16 @@ def _command_builder(
     return build
 
 
-def make_nuclei_tool(options: ExternalScanOptions | None = None) -> ExternalTool:
+def make_nuclei_tool(
+    options: ExternalScanOptions | None = None, target_list: str | None = None
+) -> ExternalTool:
     options = options or ExternalScanOptions()
     return ExternalTool(
         id="nuclei",
         binary="nuclei",
-        build_command=_command_builder(options.auth_headers, options.nuclei_dast, options.full_templates),
+        build_command=_command_builder(
+            options.auth_headers, options.nuclei_dast, options.full_templates, target_list
+        ),
         parse_output=_parse_output,
         normalizer=NucleiAdapter(),
     )

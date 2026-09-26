@@ -264,6 +264,8 @@ LIVE MODE: `scan <url>` discovers/classifies/selects/runs packs end-to-end (P3.1
 - `--auth-token` — Bearer token sent as 'Authorization: Bearer ...' by every scanner. Falls back to the BUGBOUNTY_AUTH_TOKEN env var. Redacted in output/evidence.
 - `--header` — Extra request header reused by every scanner; repeatable.
 - `--tool-timeout` (default: `600.0`) — Per-tool subprocess timeout in seconds for live scanners (default 600).
+- `--no-dast` (default: `True`) — Disable nuclei DAST parameter fuzzing (on by default for live URL scans).
+- `--full-templates` — With DAST, also run the full nuclei template set (slower, broader) instead of only the fast fuzzing templates.
 - `--testcases` (default: `testcase/suites/basic.yaml`)
 - `--db` (default: `runs/scan.sqlite`)
 - `--max-pages` (default: `5`) — LIVE/HYBRID MODE only: max pages for the discovery crawl

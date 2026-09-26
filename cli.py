@@ -1046,6 +1046,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--tool-timeout", type=float, default=600.0,
         help="Per-tool subprocess timeout in seconds for live scanners (default 600).",
     )
+    scan.add_argument(
+        "--no-dast", dest="nuclei_dast", action="store_false",
+        help="Disable nuclei DAST parameter fuzzing (on by default for live URL scans).",
+    )
+    scan.add_argument(
+        "--full-templates", action="store_true",
+        help="With DAST, also run the full nuclei template set (slower, broader) instead of "
+        "only the fast fuzzing templates.",
+    )
+    scan.set_defaults(nuclei_dast=True)
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))
     scan.add_argument("--max-pages", type=int, default=5, help="LIVE/HYBRID MODE only: max pages for the discovery crawl")

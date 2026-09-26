@@ -647,7 +647,10 @@ async def run_live_scan_pipeline(
     # module, and findings.external_tool imports packs.runner (for
     # PackRunResult) -- importing either at module scope here would be
     # circular.
+    from dataclasses import replace
+
     from findings.external_tool import promote_external_tool_findings
+    from live.endpoints import collect_param_endpoints
     from packs.runner import run_selected_packs
     from tools.runner import ExternalScanOptions
 
@@ -655,6 +658,11 @@ async def run_live_scan_pipeline(
     scan_options = scan_options or ExternalScanOptions()
     discovery = await discover_target(url, policy, max_pages=max_pages, transport=transport)
     candidates = classify_items(discovery.items)
+
+    # WP-06: reuse discovery's parameterized endpoints for nuclei DAST
+    # fuzzing instead of re-crawling (§8), only when DAST is enabled.
+    param_endpoints = collect_param_endpoints(discovery, policy) if scan_options.nuclei_dast else []
+    scan_options = replace(scan_options, param_endpoints=tuple(param_endpoints))
 
     auto_profile_results = (
         await auto_profile_candidates(candidates, policy, store, transport=transport) if auto_profile else []
@@ -713,6 +721,7 @@ async def run_live_scan_pipeline(
         "mode": "live",
         "url": url,
         "profile": profile.name,
+        "param_endpoints": list(param_endpoints),
         "discovery": discovery.to_dict(),
         "classification": [candidate.to_dict() for candidate in candidates],
         "auto_profile": [result.to_dict() for result in auto_profile_results],

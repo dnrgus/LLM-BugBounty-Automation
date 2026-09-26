@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -183,14 +185,31 @@ async def _run_external_tool_pack(
 
     factory = _LIVE_TOOL_FACTORIES.get(tool_id)
     if factory is not None and live_target_url is not None:
-        execution = await run_external_tool(
-            factory(options),
-            live_target_url,
-            policy,
-            run_id=new_id("run"),
-            target_id="pack_run_live",
-            timeout_seconds=options.tool_timeout,
-        )
+        # WP-06: nuclei DAST against the parameterized endpoints reused from
+        # discovery. The endpoints go in a temp -l list; live_target_url is
+        # still what run_external_tool validates against Policy/Scope, and
+        # every listed URL was already scope-validated by collect_param_endpoints.
+        list_path: str | None = None
+        if tool_id == "nuclei" and options.nuclei_dast and options.param_endpoints:
+            fd, list_path = tempfile.mkstemp(prefix="nuclei_dast_", suffix=".txt")
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(options.param_endpoints) + "\n")
+        try:
+            # Only the DAST-with-endpoint-list case needs the dedicated
+            # list-mode nuclei tool; every other case goes through the
+            # factory dict (so tests can inject a fixture tool there).
+            tool = make_nuclei_tool(options, target_list=list_path) if list_path is not None else factory(options)
+            execution = await run_external_tool(
+                tool,
+                live_target_url,
+                policy,
+                run_id=new_id("run"),
+                target_id="pack_run_live",
+                timeout_seconds=options.tool_timeout,
+            )
+        finally:
+            if list_path is not None:
+                os.unlink(list_path)
         summary = {"execution": execution.to_dict()}
         if execution.status == "ran":
             summary["count"] = len(execution.findings)
