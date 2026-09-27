@@ -1,0 +1,33 @@
+program: local-juiceshop
+scope:
+  domains: [localhost]
+  allow_subdomains: false
+  deny_domains: []
+  url_patterns:
+    - http://localhost:3000
+    - http://localhost:3000/*
+  deny_url_patterns: []
+testing:
+  automated_scanning: true
+  prompt_injection: true
+  system_prompt_leak: true
+  indirect_injection: true
+  rag_security: true
+  tool_abuse: false
+  agent_security: false
+  destructive_actions: false
+  denial_of_service: false
+  cross_user_data_access: false
+  state_changing_requests: dry_run
+limits:
+  requests_per_second: 5
+  concurrency: 3
+  max_requests_per_run: 3000
+approval_required:
+  - external_callback
+  - file_write
+blocked_actions:
+  - send_message
+  - account_state_change
+  - payment
+  - delete
