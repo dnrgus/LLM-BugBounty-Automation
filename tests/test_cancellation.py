@@ -174,7 +174,7 @@ def _fixture_sleeping_binary(tmp_path: Path, sleep_seconds: float = 5) -> Path:
 
 
 def test_run_external_tool_cancel_kills_the_subprocess_promptly(tmp_path: Path) -> None:
-    from adapters.scanner.nuclei import NucleiAdapter
+    from tools.adapters.scanner.nuclei import NucleiAdapter
 
     binary = _fixture_sleeping_binary(tmp_path)
     tool = ExternalTool(
@@ -198,7 +198,7 @@ def test_run_external_tool_cancel_kills_the_subprocess_promptly(tmp_path: Path) 
 
 
 def test_run_external_tool_without_cancellation_still_behaves_as_before(tmp_path: Path) -> None:
-    from adapters.scanner.nuclei import NucleiAdapter
+    from tools.adapters.scanner.nuclei import NucleiAdapter
 
     binary = _fixture_sleeping_binary(tmp_path, sleep_seconds=5)
     tool = ExternalTool(

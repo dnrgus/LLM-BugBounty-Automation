@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import httpx
 
-from adapters.llm.pyrit import PyRITAdapter
-from adapters.scanner.dalfox import DalfoxAdapter
-from adapters.scanner.nuclei import NucleiAdapter
-from adapters.secrets.trufflehog import TruffleHogAdapter
+from tools.adapters.llm.pyrit import PyRITAdapter
+from tools.adapters.scanner.dalfox import DalfoxAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.secrets.trufflehog import TruffleHogAdapter
 from attack_surface.models import AttackSurfaceItem
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine
@@ -28,6 +30,7 @@ from core.models import (
     Trace,
     new_id,
 )
+from core.paths import evidence_raw_dir, evidence_sanitized_dir, shareable_reports_dir
 from core.profile import PipelineProfile
 from core.profiler import profile_target
 from correlation.resolver import EntityMatch, resolve_entities
@@ -59,6 +62,10 @@ from testcase.coverage import build_coverage_matrix, coverage_summary
 from testcase.selector import select_executable_testcases
 from testcase.schema import Testcase
 from validation.planner import generate_validation_plans
+
+if TYPE_CHECKING:
+    # Runtime import stays local in run_live_scan_pipeline (circular via packs.runner).
+    from tools.runner import ExternalScanOptions
 
 _MAX_CONSECUTIVE_TARGET_ERRORS = 3
 
@@ -243,7 +250,7 @@ async def run_sample_pipeline(
     # artifact; the raw path/hash are provenance, not what a report
     # should link to.
     manifest = build_run_manifest(store, run.id)
-    manifest_path = write_manifest(Path("reports/shareable"), manifest)
+    manifest_path = write_manifest(shareable_reports_dir(), manifest)
 
     return {
         "run_id": run.id,
@@ -269,7 +276,7 @@ def _cluster_and_report(run: Run, findings: list[Finding], reports: list[str]) -
     if not findings:
         return []
     clusters = cluster_findings(findings)
-    report_path = write_cluster_report(Path("reports/shareable"), run, clusters)
+    report_path = write_cluster_report(shareable_reports_dir(), run, clusters)
     reports.append(str(report_path))
     return [cluster.to_dict() for cluster in clusters]
 
@@ -362,7 +369,7 @@ async def _process_case(
         layered = judges.layered(judgement, case, response.prompt, response.text)
         evidence_payload["judge_layers"] = layered.to_dict()
     evidence_bundle = write_evidence_bundle(
-        Path("evidence/raw"), Path("evidence/sanitized"), f"{run.id}_{case.id}.json", evidence_payload
+        evidence_raw_dir(), evidence_sanitized_dir(), f"{run.id}_{case.id}.json", evidence_payload
     )
     evidence = store.record_evidence(run.id, "llm_response", evidence_bundle.sanitized_path, raw_path=evidence_bundle.raw_path)
     if not judgement.passed:
@@ -399,7 +406,7 @@ async def _process_case(
         findings.append(finding)
         metadata = evidence_bundle.to_dict()
         report = write_markdown_report(
-            Path("reports/shareable"),
+            shareable_reports_dir(),
             run,
             case,
             finding,
@@ -409,7 +416,7 @@ async def _process_case(
             evidence_metadata=metadata,
         )
         json_report = write_json_report(
-            Path("reports/shareable"),
+            shareable_reports_dir(),
             run,
             case,
             finding,
@@ -609,7 +616,7 @@ async def run_full_pipeline(
     if combined_findings:
         clusters = cluster_findings(combined_findings)
         combined_run = Run(target_id="full", policy_hash=policy.policy_hash, fingerprint="combined")
-        report_path = write_cluster_report(Path("reports/shareable"), combined_run, clusters)
+        report_path = write_cluster_report(shareable_reports_dir(), combined_run, clusters)
         all_reports.append(str(report_path))
         result["combined_clusters"] = [cluster.to_dict() for cluster in clusters]
     else:
@@ -632,6 +639,10 @@ async def run_live_scan_pipeline(
     pack_target_config: Path | str | None = None,
     pack_budget_requests: int | None = None,
     external_scan_inputs: dict[str, Path | str | None] | None = None,
+    scan_options: "ExternalScanOptions | None" = None,
+    output_dir: Path | str | None = None,
+    seed_param_endpoints: "list[str] | None" = None,
+    progress: bool = False,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     """P3.1-1 (roadmap v3.1.0 Operational Pipeline): `scan <url>`'s LIVE
@@ -646,21 +657,43 @@ async def run_live_scan_pipeline(
     # module, and findings.external_tool imports packs.runner (for
     # PackRunResult) -- importing either at module scope here would be
     # circular.
+    from dataclasses import replace
+
     from findings.external_tool import promote_external_tool_findings
+    from live.endpoints import collect_param_endpoints
     from packs.runner import run_selected_packs
+    from tools.runner import ExternalScanOptions
+
+    def _step(n: int, message: str) -> None:
+        if progress:
+            print(f"[{n}/6] {message}", file=sys.stderr, flush=True)
 
     store.initialize()
+    scan_options = scan_options or ExternalScanOptions()
+    _step(1, "Discovering endpoints...")
     discovery = await discover_target(url, policy, max_pages=max_pages, transport=transport)
+    _step(2, "Classifying attack surface...")
     candidates = classify_items(discovery.items)
+
+    # WP-06: reuse discovery's parameterized endpoints for nuclei DAST
+    # fuzzing instead of re-crawling (§8), only when DAST is enabled.
+    param_endpoints = (
+        collect_param_endpoints(discovery, policy, seeds=seed_param_endpoints or [])
+        if scan_options.nuclei_dast
+        else []
+    )
+    scan_options = replace(scan_options, param_endpoints=tuple(param_endpoints))
 
     auto_profile_results = (
         await auto_profile_candidates(candidates, policy, store, transport=transport) if auto_profile else []
     )
 
+    _step(3, "Selecting attack packs...")
     budget = AttackBudget(max_requests=pack_budget_requests) if pack_budget_requests else None
     target_kinds = {candidate.kind for candidate in candidates}
     selections = select_packs(target_kinds, policy, budget=budget)
 
+    _step(4, "Running scanners...")
     pack_runs = await run_selected_packs(
         selections,
         testcases,
@@ -671,6 +704,7 @@ async def run_live_scan_pipeline(
         profile=profile,
         external_scan_inputs={k: v for k, v in (external_scan_inputs or {}).items() if v is not None},
         live_target_url=url,
+        options=scan_options,
     )
 
     combined_run = Run(target_id="live_scan", policy_hash=policy.policy_hash, fingerprint=f"live_scan:{url}")
@@ -691,6 +725,7 @@ async def run_live_scan_pipeline(
     # first-class candidate Findings too, instead of leaving them as
     # opaque JSON inside pack_runs -- every finding scan <url> surfaces
     # now has a real confirmed/unstable/rejected/candidate status.
+    _step(5, "Normalizing and verifying findings...")
     external_tool_findings = promote_external_tool_findings(pack_runs, combined_run.id, store)
 
     reportable_findings = reportable_testcase_findings + external_tool_findings
@@ -705,10 +740,24 @@ async def run_live_scan_pipeline(
 
     clusters = _cluster_and_report(combined_run, reportable_findings, reports)
 
+    results_info = None
+    if output_dir is not None:
+        _step(6, "Writing reports...")
+        from reporting.results import write_scan_results
+
+        results_info = write_scan_results(
+            Path(output_dir),
+            reportable_findings,
+            store,
+            {"target": url, "profile": profile.name, "run_id": combined_run.id},
+        )
+
     return {
         "mode": "live",
         "url": url,
         "profile": profile.name,
+        "param_endpoints": list(param_endpoints),
+        "results": results_info,
         "discovery": discovery.to_dict(),
         "classification": [candidate.to_dict() for candidate in candidates],
         "auto_profile": [result.to_dict() for result in auto_profile_results],
@@ -733,6 +782,7 @@ async def run_hybrid_scan_pipeline(
     pack_target: str | None = None,
     pack_target_config: Path | str | None = None,
     auth_context_available: bool = False,
+    output_dir: Path | str | None = None,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> dict[str, object]:
     """P3.3-4 (roadmap v3.3.0 Static -> Dynamic Validation): `scan <url>
@@ -816,9 +866,18 @@ async def run_hybrid_scan_pipeline(
     for item in source_items:
         static_by_asset_type[item.asset_type] = static_by_asset_type.get(item.asset_type, 0) + 1
 
+    results_info = None
+    if output_dir is not None:
+        from reporting.results import write_scan_results
+
+        results_info = write_scan_results(
+            Path(output_dir), reportable, store, {"target": url, "profile": profile.name, "run_id": combined_run.id}
+        )
+
     return {
         "mode": "hybrid",
         "url": url,
+        "results": results_info,
         "source_root": str(_ingestion.root),
         "static_findings": {
             "total": len(source_items),
@@ -995,8 +1054,8 @@ async def run_reproduce_finding(
         poc = await minimize_poc(case, target, judges, session_prefix=session_prefix)
         result["minimal_poc"] = poc.to_dict()
         evidence_bundle = write_evidence_bundle(
-            Path("evidence/raw"),
-            Path("evidence/sanitized"),
+            evidence_raw_dir(),
+            evidence_sanitized_dir(),
             f"{finding_id}_minimal_poc.json",
             {
                 "finding_id": finding_id,

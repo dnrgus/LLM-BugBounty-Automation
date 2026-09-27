@@ -52,7 +52,7 @@ _SINK_PATTERNS = [
 
 # Only the detector name/location is ever stored -- never the matched value
 # itself, matching the project's evidence-security principle established
-# for the TruffleHog adapter (adapters/secrets/trufflehog.py).
+# for the TruffleHog adapter (tools/adapters/secrets/trufflehog.py).
 _SECRET_PATTERNS = [
     ("aws_access_key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("generic_api_key", re.compile(r'(?i)(?:api[_-]?key|secret|token)\s*[:=]\s*["\'][A-Za-z0-9_\-]{16,}["\']')),

@@ -3,10 +3,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-from adapters.discovery.ffuf import FfufAdapter
-from adapters.discovery.katana import KatanaAdapter
-from adapters.recon.httpx import HttpxAdapter
-from adapters.recon.subfinder import SubfinderAdapter
+from tools.adapters.discovery.ffuf import FfufAdapter
+from tools.adapters.discovery.katana import KatanaAdapter
+from tools.adapters.recon.httpx import HttpxAdapter
+from tools.adapters.recon.subfinder import SubfinderAdapter
 from core.models import Endpoint
 from recon.classifier import classify_endpoint
 from recon.pipeline import build_asset_map

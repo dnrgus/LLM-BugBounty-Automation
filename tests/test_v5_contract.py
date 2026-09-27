@@ -20,6 +20,7 @@ from core.contract import (
     execution_environment,
 )
 from core.models import FindingStatus
+from core.paths import RESULTS_DIR_ENV
 from docs.gen_cli_reference import render
 from reporting.integrity import build_run_manifest
 from scope.policy import PolicyEngine
@@ -34,7 +35,10 @@ def _subparsers() -> dict[str, argparse.ArgumentParser]:
     return next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction)).choices
 
 
-def test_cli_reference_is_up_to_date() -> None:
+def test_cli_reference_is_up_to_date(monkeypatch) -> None:
+    # Defaults must render as the real relative results path, not the
+    # test-session temp dir conftest.py points BUGBOUNTY_RESULTS_DIR at.
+    monkeypatch.delenv(RESULTS_DIR_ENV, raising=False)
     assert render() == CLI_DOC, "run: python docs/gen_cli_reference.py"
 
 

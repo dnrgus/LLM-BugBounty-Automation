@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from adapters.base import NormalizedResult
+from tools.adapters.base import NormalizedResult
 from attacks.mutation import MutationCandidate, MutationEngine
 from testcase.schema import Testcase
 

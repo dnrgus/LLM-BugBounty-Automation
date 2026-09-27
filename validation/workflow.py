@@ -7,6 +7,7 @@ import httpx
 
 from core.contract import SCHEMA_VERSIONS
 from core.models import Finding, FindingStatus, Reproduction, Run, new_id, utc_now
+from core.paths import evidence_raw_dir, evidence_sanitized_dir
 from reporting.evidence import write_evidence_bundle
 from reporting.integrity import build_run_manifest
 from scope.policy import PolicyEngine
@@ -64,7 +65,7 @@ def load_scan_artifact(path: Path | str) -> dict[str, object]:
 
 
 def _record(store: SQLiteStore, run_id: str, kind: str, name: str, payload: dict[str, object]):
-    bundle = write_evidence_bundle(Path("evidence/raw"), Path("evidence/sanitized"), f"{run_id}_{name}.json", payload)
+    bundle = write_evidence_bundle(evidence_raw_dir(), evidence_sanitized_dir(), f"{run_id}_{name}.json", payload)
     return store.record_evidence(run_id, kind, bundle.sanitized_path, raw_path=bundle.raw_path)
 
 

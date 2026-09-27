@@ -14,6 +14,12 @@ dependencies = [
   "websockets>=13.0",
 ]
 
+# Official entry point. `pip install -e .` then `bugbounty <command>`.
+# Resolves to cli.main via main.py's re-export, so the existing
+# `python main.py ...` invocation keeps working unchanged (§29).
+[project.scripts]
+bugbounty = "main:main"
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
@@ -32,14 +38,15 @@ jsts = [
 [tool.setuptools]
 py-modules = ["cli", "main"]
 packages = [
-  "adapters",
-  "adapters.llm",
-  "adapters.recon",
-  "adapters.discovery",
-  "adapters.scanner",
-  "adapters.secrets",
+  "tools.adapters",
+  "tools.adapters.llm",
+  "tools.adapters.recon",
+  "tools.adapters.discovery",
+  "tools.adapters.scanner",
+  "tools.adapters.secrets",
   "attack_surface",
   "attacks",
+  "benchmarks",
   "core",
   "correlation",
   "events",

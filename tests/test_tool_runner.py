@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
 from core.tool_doctor import ToolStatus
 from scope.policy import PolicyEngine
 from tools.dalfox import _build_command as dalfox_build_command

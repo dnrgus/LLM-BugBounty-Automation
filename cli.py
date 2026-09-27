@@ -3,18 +3,20 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import signal
 import sys
 from pathlib import Path
+from urllib.parse import urljoin
 
 import yaml
 
-from adapters.llm.garak import GarakAdapter
-from adapters.llm.promptfoo import PromptfooAdapter
-from adapters.llm.pyrit import PyRITAdapter
-from adapters.scanner.dalfox import DalfoxAdapter
-from adapters.scanner.nuclei import NucleiAdapter
-from adapters.secrets.trufflehog import TruffleHogAdapter
+from tools.adapters.llm.garak import GarakAdapter
+from tools.adapters.llm.promptfoo import PromptfooAdapter
+from tools.adapters.llm.pyrit import PyRITAdapter
+from tools.adapters.scanner.dalfox import DalfoxAdapter
+from tools.adapters.scanner.nuclei import NucleiAdapter
+from tools.adapters.secrets.trufflehog import TruffleHogAdapter
 from attacks.adaptive import AdaptivePlanner
 from attacks.mutation import MutationEngine, mutation_stats
 from benchmarks.calibration import compute_confidence_calibration_across
@@ -36,6 +38,7 @@ from core.orchestrator import (
     run_reproduce_finding,
     run_sample_pipeline,
 )
+from core.paths import internal_dir, runs_dir, shareable_reports_dir, validation_reports_dir
 from core.profile import load_profile
 from core.tool_doctor import check_tools, write_tool_lock
 from executor.runner import Executor
@@ -55,7 +58,10 @@ from scenario.executor import run_scenario
 from scenario.finding import promote_scenario_result
 from scenario.loader import load_scenarios
 from source.audit import audit_source, collect_source_items
+from core.scan_context import AuthContext, ScanContext
+from scope.auto import build_auto_scope
 from scope.policy import PolicyEngine
+from tools.runner import ExternalScanOptions
 from storage.sqlite import SQLiteStore
 from targets.factory import create_target
 from testcase.coverage import build_coverage_matrix, coverage_summary
@@ -87,6 +93,40 @@ def _json(data: object) -> str:
     return json.dumps(data, indent=2, sort_keys=True)
 
 
+# Human-readable purpose per tool, keyed by tool name with a category
+# fallback, for `bugbounty tools` / `doctor` (§16, §18). Purely cosmetic:
+# the source of truth for what is enabled stays config/tools.yaml.
+_TOOL_PURPOSE = {
+    "nuclei": "Dynamic / DAST",
+    "dalfox": "XSS",
+    "semgrep": "Static analysis",
+    "promptfoo": "LLM red team",
+    "garak": "LLM scanner",
+    "pyrit": "LLM red team",
+    "trufflehog": "Secret scan",
+    "subfinder": "Subdomain recon",
+    "httpx": "HTTP probe",
+    "katana": "Crawl / discovery",
+    "ffuf": "Fuzzing / discovery",
+}
+_CATEGORY_PURPOSE = {
+    "web_scanner": "Dynamic scan",
+    "static_analysis": "Static analysis",
+    "llm_redteam": "LLM red team",
+    "llm_scanner": "LLM scanner",
+    "secret_scanner": "Secret scan",
+    "recon": "Recon",
+    "discovery": "Discovery",
+}
+
+
+def _tool_purpose(tool: dict[str, object]) -> str:
+    name = str(tool.get("name", ""))
+    if name in _TOOL_PURPOSE:
+        return _TOOL_PURPOSE[name]
+    return _CATEGORY_PURPOSE.get(str(tool.get("category") or ""), str(tool.get("category") or ""))
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     snapshot = check_tools(args.tools)
     if args.write_lock:
@@ -94,12 +134,36 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if args.json:
         print(_json(snapshot))
         return 0
+    print("BugBounty Environment Check")
+    print()
     print(f"[OK] Python {snapshot['python']}")
     print(f"[OK] Platform {snapshot['platform']}")
     for tool in snapshot["tools"]:
         label = "OK" if tool["available"] else "WARN"
         detail = tool["version"] or tool["path"] or "not installed"
         print(f"[{label}] {tool['name']} {detail}")
+    # The internal offline pipeline (testcase suites, judge, reproducer,
+    # report) needs no external tool, so core readiness never depends on
+    # them (§17 critical vs optional). External scanners are optional
+    # capabilities that degrade gracefully when missing.
+    print()
+    print("Core pipeline ready.")
+    missing = [t["name"] for t in snapshot["tools"] if not t["available"]]
+    if missing:
+        print(f"Optional tools missing (capabilities degraded): {', '.join(missing)}")
+    return 0
+
+
+def cmd_tools(args: argparse.Namespace) -> int:
+    snapshot = check_tools(args.tools)
+    if args.json:
+        print(_json(snapshot))
+        return 0
+    print(f"{'Tool':<15} {'Status':<11} Purpose")
+    print(f"{'-' * 14:<15} {'-' * 10:<11} {'-' * 7}")
+    for tool in snapshot["tools"]:
+        status = "Ready" if tool["available"] else "Missing"
+        print(f"{tool['name']:<15} {status:<11} {_tool_purpose(tool)}")
     return 0
 
 
@@ -446,7 +510,7 @@ async def _run_scenarios(args: argparse.Namespace) -> dict[str, object]:
     if all_findings:
         clusters = cluster_findings(all_findings)
         combined_run = Run(target_id=target_metadata.id, policy_hash=policy.policy_hash, fingerprint="scenario_combined")
-        report_path = str(write_cluster_report(Path("reports/shareable"), combined_run, clusters))
+        report_path = str(write_cluster_report(shareable_reports_dir(), combined_run, clusters))
         cluster_payload = [cluster.to_dict() for cluster in clusters]
     else:
         cluster_payload = []
@@ -481,12 +545,83 @@ def cmd_recon(args: argparse.Namespace) -> int:
     return 0
 
 
+def _resolve_scan_policy(args: argparse.Namespace) -> PolicyEngine:
+    """WP-04: pick the scope for a scan.
+
+    Explicit --scope always wins. Otherwise, a URL target on a
+    loopback/private host gets a conservative auto-scope so a local lab
+    (e.g. Juice Shop on 127.0.0.1) needs no hand-written YAML; a public
+    host raises (ScopeNotAutoAllowedError -> exit 3) demanding an explicit
+    --scope, so usability never invents authorization (§4, §32). With no
+    URL (the fixture-driven --profile path) the historical DEFAULT_SCOPE is
+    used, preserving existing behavior.
+    """
+    if args.scope is not None:
+        return PolicyEngine.from_yaml(args.scope)
+    if args.url:
+        config = build_auto_scope(args.url)
+        print(
+            f"[scope] no --scope given; using auto-scope for local target {args.url}",
+            file=sys.stderr,
+        )
+        return PolicyEngine(config)
+    return PolicyEngine.from_yaml(DEFAULT_SCOPE)
+
+
+def _auth_from_args(args: argparse.Namespace) -> AuthContext:
+    """Collect --auth-token / --header (and the BUGBOUNTY_AUTH_TOKEN env
+    fallback) into one AuthContext reused by every scanner (§19)."""
+    headers: dict[str, str] = {}
+    for raw in getattr(args, "header", None) or []:
+        name, sep, value = raw.partition(":")
+        if not sep:
+            raise ValueError(f"--header must be 'Name: value', got {raw!r}")
+        headers[name.strip()] = value.strip()
+    token = getattr(args, "auth_token", None) or os.environ.get("BUGBOUNTY_AUTH_TOKEN")
+    return AuthContext(token=token, headers=headers)
+
+
+def _scan_output_dir(args: argparse.Namespace) -> Path:
+    """Where a scan's results directory goes (§14). --output wins; otherwise
+    a timestamped folder under ./results/BugBounty-Results derived from the target."""
+    explicit = getattr(args, "output", None)
+    if explicit is not None:
+        return Path(explicit)
+    return ScanContext.create(target=args.url, source_path=args.source).output_dir
+
+
+def _seed_param_endpoints(args: argparse.Namespace) -> list[str]:
+    """Operator-supplied parameterized endpoints to DAST-fuzz, from
+    --param-endpoint (repeatable) and --endpoints-file (one URL per line).
+    They are still scope-validated downstream (§13)."""
+    raw: list[str] = list(getattr(args, "param_endpoint", None) or [])
+    endpoints_file = getattr(args, "endpoints_file", None)
+    if endpoints_file is not None:
+        for line in Path(endpoints_file).read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                raw.append(line)
+    # Allow relative paths (e.g. "/search?q=x") by resolving against the target.
+    base = args.url or ""
+    return [item if "://" in item else urljoin(base, item) for item in raw]
+
+
+def _scan_options_from_args(args: argparse.Namespace) -> ExternalScanOptions:
+    auth = _auth_from_args(args)
+    return ExternalScanOptions(
+        auth_headers=auth.as_request_headers(),
+        tool_timeout=float(getattr(args, "tool_timeout", 600.0)),
+        nuclei_dast=getattr(args, "nuclei_dast", False),
+        full_templates=getattr(args, "full_templates", False),
+    )
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     if args.source and not args.url:
         # P4.5 WP-03: SOURCE-only `scan --source <path>` writes the common
         # scan artifact (inventory + candidates) that `validate` reads.
         artifact = build_scan_artifact(args.source, captured_requests=args.captured_requests)
-        artifact_path = write_artifact(args.artifact or Path("runs/artifacts") / f"{artifact['id']}.json", artifact)
+        artifact_path = write_artifact(args.artifact or runs_dir() / "artifacts" / f"{artifact['id']}.json", artifact)
         inventory = artifact["endpoint_inventory"]
         print(
             _json(
@@ -503,7 +638,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         return 0
 
     profile = load_profile(args.profile, args.pipeline_config)
-    policy = PolicyEngine.from_yaml(args.scope)
+    policy = _resolve_scan_policy(args)
     testcases = load_testcases(args.testcases)
     store = SQLiteStore(args.db)
 
@@ -523,9 +658,14 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 pack_target=args.pack_target,
                 pack_target_config=args.pack_target_config,
                 auth_context_available=args.auth_context,
+                output_dir=_scan_output_dir(args),
             )
         )
         print(_json(result))
+        if result.get("results"):
+            from reporting.results import render_console_summary
+
+            print(render_console_summary(result["results"]), file=sys.stderr)
         return 0
 
     if args.url:
@@ -548,9 +688,17 @@ def cmd_scan(args: argparse.Namespace) -> int:
                     "dalfox": args.dalfox_results,
                     "trufflehog": args.trufflehog_results,
                 },
+                scan_options=_scan_options_from_args(args),
+                output_dir=_scan_output_dir(args),
+                seed_param_endpoints=_seed_param_endpoints(args),
+                progress=not getattr(args, "quiet", False),
             )
         )
         print(_json(result))
+        if result.get("results"):
+            from reporting.results import render_console_summary
+
+            print(render_console_summary(result["results"]), file=sys.stderr)
         return 0
 
     recon_inputs = {
@@ -630,8 +778,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--tools", type=Path, default=DEFAULT_TOOLS)
     doctor.add_argument("--json", action="store_true", help="Print machine-readable doctor output")
     doctor.add_argument("--write-lock", action="store_true", help="Write tool_versions.lock.yaml")
-    doctor.add_argument("--lockfile", type=Path, default=Path("tool_versions.lock.yaml"))
+    doctor.add_argument("--lockfile", type=Path, default=internal_dir("tool_versions.lock.yaml"))
     doctor.set_defaults(func=cmd_doctor)
+
+    tools_cmd = sub.add_parser("tools", help="List supported external tools and their status/purpose")
+    tools_cmd.add_argument("--tools", type=Path, default=DEFAULT_TOOLS)
+    tools_cmd.add_argument("--json", action="store_true", help="Print machine-readable tool status")
+    tools_cmd.set_defaults(func=cmd_tools)
 
     fingerprint = sub.add_parser("fingerprint", help="Create a reproducibility fingerprint")
     fingerprint.add_argument("--target-build", default="local")
@@ -645,7 +798,7 @@ def build_parser() -> argparse.ArgumentParser:
     sample = sub.add_parser("sample-run", help="Run the offline fake target pipeline")
     sample.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     sample.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
-    sample.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
+    sample.add_argument("--db", type=Path, default=runs_dir() / "sample.sqlite")
     sample.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     sample.add_argument(
         "--target-config",
@@ -677,7 +830,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Probe a target's capabilities (declared config + observed multi-turn behavior)",
     )
     profile_cmd.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
-    profile_cmd.add_argument("--db", type=Path, default=Path("runs/profile.sqlite"))
+    profile_cmd.add_argument("--db", type=Path, default=runs_dir() / "profile.sqlite")
     profile_cmd.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     profile_cmd.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
     profile_cmd.add_argument(
@@ -694,7 +847,7 @@ def build_parser() -> argparse.ArgumentParser:
     reproduce.add_argument("finding_id")
     reproduce.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     reproduce.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
-    reproduce.add_argument("--db", type=Path, default=Path("runs/sample.sqlite"))
+    reproduce.add_argument("--db", type=Path, default=runs_dir() / "sample.sqlite")
     reproduce.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     reproduce.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
     reproduce.add_argument(
@@ -717,15 +870,15 @@ def build_parser() -> argparse.ArgumentParser:
     validate_cmd.add_argument("--artifact", type=Path, required=True)
     validate_cmd.add_argument("--base-url", required=True, help="Base URL of the authorized target")
     validate_cmd.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
-    validate_cmd.add_argument("--db", type=Path, default=Path("runs/validate.sqlite"))
+    validate_cmd.add_argument("--db", type=Path, default=runs_dir() / "validate.sqlite")
     validate_cmd.add_argument("--auth-contexts", type=Path, default=None)
     validate_cmd.add_argument("--key-field", action="append", default=None, help="response field compared (as a hash)")
     validate_cmd.set_defaults(func=cmd_validate)
 
     report_cmd = sub.add_parser("report", help="Write per-finding reports for a `validate` run")
     report_cmd.add_argument("--run-id", required=True)
-    report_cmd.add_argument("--db", type=Path, default=Path("runs/validate.sqlite"))
-    report_cmd.add_argument("--out", type=Path, default=Path("reports/validation"))
+    report_cmd.add_argument("--db", type=Path, default=runs_dir() / "validate.sqlite")
+    report_cmd.add_argument("--out", type=Path, default=validation_reports_dir())
     report_cmd.set_defaults(func=cmd_report)
 
     judge_benchmark = sub.add_parser("judge-benchmark", help="Run judge benchmark fixtures")
@@ -793,7 +946,7 @@ def build_parser() -> argparse.ArgumentParser:
     adaptive_run.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     adaptive_run.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
     adaptive_run.add_argument("--input", type=Path, required=True)
-    adaptive_run.add_argument("--db", type=Path, default=Path("runs/adaptive.sqlite"))
+    adaptive_run.add_argument("--db", type=Path, default=runs_dir() / "adaptive.sqlite")
     adaptive_run.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     adaptive_run.add_argument("--target-config", type=Path, help="YAML target config; overrides --target")
     adaptive_run.set_defaults(func=cmd_adaptive_run)
@@ -805,7 +958,7 @@ def build_parser() -> argparse.ArgumentParser:
     recon.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     recon.add_argument("--run-id", default="run_fixture")
     recon.add_argument("--target-id", default="target_fixture")
-    recon.add_argument("--db", type=Path, default=Path("runs/recon.sqlite"))
+    recon.add_argument("--db", type=Path, default=runs_dir() / "recon.sqlite")
     recon.add_argument("--subfinder-input", type=Path)
     recon.add_argument("--httpx-input", type=Path)
     recon.add_argument("--katana-input", type=Path)
@@ -839,7 +992,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_scenario_cmd.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
     run_scenario_cmd.add_argument("--scenarios", type=Path, default=DEFAULT_SCENARIOS)
-    run_scenario_cmd.add_argument("--db", type=Path, default=Path("runs/scenario.sqlite"))
+    run_scenario_cmd.add_argument("--db", type=Path, default=runs_dir() / "scenario.sqlite")
     run_scenario_cmd.add_argument("--target", choices=["fake-llm", "fake-agent", "fake-rag", "openai"], default="fake-llm")
     run_scenario_cmd.add_argument(
         "--target-config", type=Path, default=None,
@@ -862,7 +1015,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--auto-profile", action="store_true",
         help="U5 Auto Profiler: classify, then hand llm/api candidates to the Capability Probe for best-effort verification (implies --classify)",
     )
-    discover.add_argument("--db", type=Path, default=Path("runs/discover.sqlite"))
+    discover.add_argument("--db", type=Path, default=runs_dir() / "discover.sqlite")
     discover.add_argument(
         "--select-packs", action="store_true",
         help="U6 Pack Selector: classify, then decide which Attack Packs apply given policy and (optional) budget",
@@ -914,9 +1067,52 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--profile", choices=["quick", "llm", "agent", "rag", "web", "full"], default="quick")
     scan.add_argument("--pipeline-config", type=Path, default=DEFAULT_PIPELINE_CONFIG)
-    scan.add_argument("--scope", type=Path, default=DEFAULT_SCOPE)
+    scan.add_argument(
+        "--scope", type=Path, default=None,
+        help="Scope/policy YAML. Omit for a localhost/private URL to get a safe auto-scope; "
+        "public URLs require this. With no URL (fixture --profile mode) defaults to the sample scope.",
+    )
+    scan.add_argument(
+        "--auth-token", default=None,
+        help="Bearer token sent as 'Authorization: Bearer ...' by every scanner. "
+        "Falls back to the BUGBOUNTY_AUTH_TOKEN env var. Redacted in output/evidence.",
+    )
+    scan.add_argument(
+        "--header", action="append", default=None, metavar="'Name: value'",
+        help="Extra request header reused by every scanner; repeatable.",
+    )
+    scan.add_argument(
+        "--tool-timeout", type=float, default=600.0,
+        help="Per-tool subprocess timeout in seconds for live scanners (default 600).",
+    )
+    scan.add_argument(
+        "--no-dast", dest="nuclei_dast", action="store_false",
+        help="Disable nuclei DAST parameter fuzzing (on by default for live URL scans).",
+    )
+    scan.add_argument(
+        "--full-templates", action="store_true",
+        help="With DAST, also run the full nuclei template set (slower, broader) instead of "
+        "only the fast fuzzing templates.",
+    )
+    scan.add_argument(
+        "--output", "-o", type=Path, default=None,
+        help="Results directory. Default: a timestamped folder under ./results/BugBounty-Results/.",
+    )
+    scan.add_argument(
+        "--param-endpoint", action="append", default=None, metavar="URL",
+        help="Parameterized URL to DAST-fuzz (e.g. http://host/search?q=x); repeatable. "
+        "Scope-validated. Use to reach endpoints the passive crawler can't (e.g. SPA APIs).",
+    )
+    scan.add_argument(
+        "--endpoints-file", type=Path, default=None,
+        help="File of parameterized URLs (one per line, # comments) to DAST-fuzz.",
+    )
+    scan.add_argument(
+        "--quiet", action="store_true", help="Suppress the [n/6] progress lines on stderr.",
+    )
+    scan.set_defaults(nuclei_dast=True)
     scan.add_argument("--testcases", type=Path, default=DEFAULT_TESTCASES)
-    scan.add_argument("--db", type=Path, default=Path("runs/scan.sqlite"))
+    scan.add_argument("--db", type=Path, default=runs_dir() / "scan.sqlite")
     scan.add_argument("--max-pages", type=int, default=5, help="LIVE/HYBRID MODE only: max pages for the discovery crawl")
     scan.add_argument(
         "--auto-profile", action="store_true",

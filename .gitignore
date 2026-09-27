@@ -12,14 +12,19 @@ venv/
 dist/
 build/
 
+# All run output: scan results, SQLite stores, evidence, reports, tool lock
+# (core/paths.py). Never committed.
+results/
+
+# Pre-results/ output locations, kept ignored for older checkouts.
 runs/
 evidence/raw/
 evidence/sanitized/
-reports/private/
-reports/shareable/
-reports/validation/
-reports/ci_validation/
+reports/
+BugBounty-Results/
+tool_versions.lock.yaml
 *.sqlite
 *.sqlite3
-tool_versions.lock.yaml
 
+# Local tool caches
+.context-compress/

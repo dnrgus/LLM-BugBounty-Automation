@@ -4,7 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from adapters.llm.pyrit import PyRITAdapter
+from tools.adapters.llm.pyrit import PyRITAdapter
 from attacks.adaptive import AdaptivePlanner
 from storage.sqlite import SQLiteStore
 from testcase.loader import load_testcases

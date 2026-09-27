@@ -4,14 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from adapters.base import NormalizedResult, ToolSource
+from tools.adapters.base import NormalizedResult, ToolSource
 
 _SEVERITY_SCORE = {"info": 0.1, "low": 0.3, "medium": 0.5, "high": 0.8, "critical": 1.0}
-_CONFIRMED_TYPES = {"V", "VULN"}
 
 
-class DalfoxAdapter:
-    tool = "dalfox"
+class NucleiAdapter:
+    tool = "nuclei"
 
     def parse_file(
         self,
@@ -20,8 +19,8 @@ class DalfoxAdapter:
         target_id: str,
         version: str | None = None,
     ) -> list[NormalizedResult]:
-        data = json.loads(Path(path).read_text(encoding="utf-8"))
-        records = data if isinstance(data, list) else data.get("results") or data.get("findings") or []
+        lines = Path(path).read_text(encoding="utf-8").splitlines()
+        records = [json.loads(line) for line in lines if line.strip()]
         return self.parse(records, run_id=run_id, target_id=target_id, version=version, raw_artifact_ref=str(path))
 
     def parse(
@@ -34,25 +33,25 @@ class DalfoxAdapter:
     ) -> list[NormalizedResult]:
         results: list[NormalizedResult] = []
         for item in records:
-            if item.get("type") not in _CONFIRMED_TYPES:
-                continue
-            severity = str(item.get("severity", "medium")).lower()
-            param = item.get("param", "")
+            info = item.get("info") or {}
+            severity = str(info.get("severity", "info")).lower()
+            tags = info.get("tags") or []
+            category = tags[0] if tags else item.get("template-id", "nuclei_finding")
             results.append(
                 NormalizedResult(
                     run_id=run_id,
                     target_id=target_id,
                     source=ToolSource(self.tool, version),
-                    category="xss",
-                    title=f"Reflected XSS via '{param}'" if param else "Dalfox XSS finding",
-                    endpoint=item.get("data"),
+                    category=str(category),
+                    title=str(info.get("name") or item.get("template-id") or "Nuclei finding"),
+                    endpoint=item.get("matched-at") or item.get("host"),
                     raw_artifact_ref=raw_artifact_ref,
                     detector_score=_SEVERITY_SCORE.get(severity, 0.0),
                     framework_tags=_framework_tags(item),
                     metadata={
-                        "param": param,
-                        "payload": item.get("payload"),
-                        "cwe": item.get("cwe"),
+                        "template_id": item.get("template-id"),
+                        "tags": tags,
+                        "severity": severity,
                         "raw": item,
                     },
                 )

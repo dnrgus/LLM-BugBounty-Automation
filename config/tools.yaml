@@ -27,6 +27,10 @@ tools:
     enabled: true
     category: discovery
     output: json
+  semgrep:
+    enabled: true
+    category: static_analysis
+    output: json
   nuclei:
     enabled: true
     category: web_scanner

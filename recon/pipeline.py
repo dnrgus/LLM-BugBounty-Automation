@@ -3,10 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from adapters.discovery.ffuf import FfufAdapter
-from adapters.discovery.katana import KatanaAdapter
-from adapters.recon.httpx import HttpxAdapter
-from adapters.recon.subfinder import SubfinderAdapter
+from tools.adapters.discovery.ffuf import FfufAdapter
+from tools.adapters.discovery.katana import KatanaAdapter
+from tools.adapters.recon.httpx import HttpxAdapter
+from tools.adapters.recon.subfinder import SubfinderAdapter
 from core.models import Asset, Endpoint
 from recon.classifier import classify_endpoint
 from scope.policy import PolicyEngine
