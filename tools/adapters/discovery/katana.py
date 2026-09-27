@@ -10,12 +10,24 @@ from core.models import Endpoint
 class KatanaAdapter:
     tool = "katana"
 
-    def parse_file(self, path: Path | str, run_id: str, target_id: str) -> list[Endpoint]:
+    def parse_file(
+        self,
+        path: Path | str,
+        run_id: str,
+        target_id: str,
+        version: str | None = None,
+    ) -> list[Endpoint]:
         lines = Path(path).read_text(encoding="utf-8").splitlines()
         records = [json.loads(line) for line in lines if line.strip()]
-        return self.parse(records, run_id=run_id, target_id=target_id)
+        return self.parse(records, run_id=run_id, target_id=target_id, version=version)
 
-    def parse(self, records: list[dict[str, Any]], run_id: str, target_id: str) -> list[Endpoint]:
+    def parse(
+        self,
+        records: list[dict[str, Any]],
+        run_id: str,
+        target_id: str,
+        version: str | None = None,
+    ) -> list[Endpoint]:
         endpoints: list[Endpoint] = []
         for record in records:
             request = record.get("request") or {}

@@ -660,7 +660,7 @@ async def run_live_scan_pipeline(
     from dataclasses import replace
 
     from findings.external_tool import promote_external_tool_findings
-    from live.endpoints import collect_param_endpoints
+    from live.endpoints import collect_param_endpoints, discover_katana_endpoints
     from packs.runner import run_selected_packs
     from tools.runner import ExternalScanOptions
 
@@ -675,8 +675,24 @@ async def run_live_scan_pipeline(
     _step(2, "Classifying attack surface...")
     candidates = classify_items(discovery.items)
 
-    # WP-06: reuse discovery's parameterized endpoints for nuclei DAST
+    # WP-06/11: reuse discovery's parameterized endpoints for nuclei DAST
     # fuzzing instead of re-crawling (§8), only when DAST is enabled.
+    # discover_target only sees static HTML links/forms, so an SPA's
+    # fetch/XHR calls (e.g. Juice Shop's /rest/products/search?q= fired on
+    # page load) need katana's headless+XHR crawl to surface without a
+    # manual --param-endpoint. Folded into fetched_urls so it gets the same
+    # require_query + scope filtering as anything else discover_target found.
+    if scan_options.nuclei_dast:
+        discovery.fetched_urls.extend(
+            await discover_katana_endpoints(
+                url,
+                policy,
+                run_id=new_id("run"),
+                target_id="live_scan",
+                timeout_seconds=scan_options.tool_timeout,
+                headers=scan_options.auth_headers,
+            )
+        )
     param_endpoints = (
         collect_param_endpoints(discovery, policy, seeds=seed_param_endpoints or [])
         if scan_options.nuclei_dast

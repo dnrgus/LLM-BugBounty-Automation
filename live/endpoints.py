@@ -14,6 +14,41 @@ from urllib.parse import urlparse
 
 from live.discovery import DiscoveryResult
 from scope.policy import PolicyEngine
+from tools.katana import make_katana_tool
+from tools.runner import run_external_tool
+
+
+async def discover_katana_endpoints(
+    url: str,
+    policy: PolicyEngine,
+    *,
+    run_id: str,
+    target_id: str,
+    timeout_seconds: float,
+    headers: dict[str, str] | None = None,
+) -> list[str]:
+    """Headless-crawl `url` with katana to find endpoints a static-HTML
+    crawl (live.discovery.discover_target) can't -- an SPA's fetch/XHR
+    calls, like Juice Shop's product grid firing
+    /rest/products/search?q= on page load with no user interaction.
+
+    Returns raw URLs (with or without a query string); the caller folds
+    them into DiscoveryResult.fetched_urls so they get the exact same
+    require_query + scope filtering as any other discovered URL, in
+    collect_param_endpoints below. When katana isn't installed,
+    run_external_tool's own skipped_tool_not_installed path returns no
+    findings, so this degrades to [] instead of raising (see
+    `bugbounty doctor`).
+    """
+    result = await run_external_tool(
+        make_katana_tool(headers=headers),
+        url,
+        policy,
+        run_id=run_id,
+        target_id=target_id,
+        timeout_seconds=timeout_seconds,
+    )
+    return [endpoint.url for endpoint in result.findings]
 
 
 def collect_param_endpoints(
