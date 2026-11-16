@@ -2,6 +2,7 @@ import json
 import subprocess
 
 from integrations.artex_bridge import _artex_assets, run
+from cli import main
 
 
 def test_bridge_marks_only_confirmed_as_graph_findings(tmp_path, monkeypatch):
@@ -92,6 +93,15 @@ def test_bridge_timeout_invalid_json_and_empty_result(tmp_path, monkeypatch):
     assert result["ok"] is True
     assert result["findings"] == []
     assert result["artex_assets"] == []
+
+
+def test_scan_rejects_starting_url_outside_explicit_scope(tmp_path, capsys):
+    scope = tmp_path / "scope.yaml"
+    scope.write_text("scope:\n  domains: [allowed.example]\ntesting:\n  automated_scanning: true\n", encoding="utf-8")
+    rc = main(["scan", "https://outside.example/", "--scope", str(scope), "--output", str(tmp_path / "out")])
+    assert rc == 3
+    assert "outside allowed scope" in json.loads(capsys.readouterr().err)["detail"]
+    assert not (tmp_path / "out").exists()
 
 
 def test_artex_assets_excludes_unobserved_js_paths_and_unknown_methods():
