@@ -1,5 +1,7 @@
 # LLM-BugBounty-Automation
 
+ARTEX worker에서 이 프로젝트의 스캔·검증 결과를 호출하는 첫 연결은 [ARTEX 통합 가이드](docs/ARTEX_INTEGRATION.md)를 참고하세요.
+
 [![CI](https://github.com/dnrgus/LLM-BugBounty-Automation/actions/workflows/ci.yml/badge.svg)](https://github.com/dnrgus/LLM-BugBounty-Automation/actions/workflows/ci.yml)
 
 허가된 LLM, RAG, AI Agent, 웹 기반 AI 서비스를 반복 가능하고 증거 중심으로 점검하기 위한 보안 테스트 자동화 프로젝트입니다.

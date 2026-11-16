@@ -38,6 +38,7 @@ jsts = [
 [tool.setuptools]
 py-modules = ["cli", "main"]
 packages = [
+  "integrations",
   "tools.adapters",
   "tools.adapters.llm",
   "tools.adapters.recon",
