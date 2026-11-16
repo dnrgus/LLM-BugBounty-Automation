@@ -15,6 +15,8 @@ def test_bridge_marks_only_confirmed_as_graph_findings(tmp_path, monkeypatch):
             {"id": "c", "title": "Flaky", "status": "unstable", "path": "medium/c"},
         ],
     }), encoding="utf-8")
+    (output / "high/a").mkdir(parents=True)
+    (output / "high/a/evidence.json").write_text(json.dumps({"response": "observed proof"}), encoding="utf-8")
 
     def fake_run(command, **kwargs):
         assert command[2:4] == ["scan", "http://127.0.0.1:3000"]
@@ -34,6 +36,21 @@ def test_bridge_marks_only_confirmed_as_graph_findings(tmp_path, monkeypatch):
     assert result["pack_executions"][0]["status"] == "skipped_tool_not_installed"
     assert "summary" not in result["pack_executions"][0]
     assert [item["graph_kind"] for item in result["findings"]] == ["finding", "candidate", "candidate"]
+    assert len(result["findings"][0]["evidence"]["sha256"]) == 64
+
+
+def test_confirmed_without_evidence_is_only_candidate(tmp_path, monkeypatch):
+    output = tmp_path / "scan"
+    output.mkdir()
+    (output / "summary.json").write_text(json.dumps({
+        "target": "http://127.0.0.1:3000", "findings": [
+            {"id": "a", "title": "No proof", "status": "confirmed", "path": "high/a"},
+        ],
+    }), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(
+        command, 0, json.dumps({"mode": "live", "results": {"results_dir": str(output)}}), ""))
+    result = run("http://127.0.0.1:3000", None, output, "quick", 10)
+    assert result["findings"][0]["graph_kind"] == "candidate"
 
 
 def test_bridge_does_not_publish_stale_summary_after_failure(tmp_path, monkeypatch):
@@ -54,6 +71,27 @@ def test_bridge_passes_target_adapter_to_real_testcase_packs(tmp_path, monkeypat
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     assert run("http://127.0.0.1:3000", None, tmp_path, "llm", 10, config)["error"] == "scan_failed"
+
+
+def test_bridge_timeout_invalid_json_and_empty_result(tmp_path, monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], 1)
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    assert run("http://127.0.0.1:3000", None, tmp_path, "quick", 1)["error"] == "scan_timeout"
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(
+        command, 0, "not-json", ""))
+    assert run("http://127.0.0.1:3000", None, tmp_path, "quick", 1)["error"] == "invalid_scan_output"
+
+    (tmp_path / "summary.json").write_text(json.dumps({
+        "target": "http://127.0.0.1:3000", "findings": [],
+    }), encoding="utf-8")
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: subprocess.CompletedProcess(
+        command, 0, json.dumps({"mode": "live", "results": {"results_dir": str(tmp_path)}}), ""))
+    result = run("http://127.0.0.1:3000", None, tmp_path, "quick", 1)
+    assert result["ok"] is True
+    assert result["findings"] == []
+    assert result["artex_assets"] == []
 
 
 def test_artex_assets_excludes_unobserved_js_paths_and_unknown_methods():

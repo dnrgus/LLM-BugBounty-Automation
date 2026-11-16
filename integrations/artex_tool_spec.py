@@ -40,8 +40,8 @@ def build_spec(repo: Path, scope: Path, python: Path, target_config: Path | None
         "key": "bugbounty_scan",
         "description": (
             "Scan an authorized URL. Returns JSON assets, confirmed findings, candidates, "
-            "and pack execution coverage. Record assets with insert_assets; record candidate "
-            "observations with record_fact; report only confirmed findings with report_finding. "
+            "and pack execution coverage. The ARTEX bridge records observed assets, candidate "
+            "facts, skipped coverage, and evidence-backed confirmed findings automatically. "
             "Use pack_executions to distinguish skipped tests from negative results."
         ),
         "schema": {
@@ -57,6 +57,48 @@ def build_spec(repo: Path, scope: Path, python: Path, target_config: Path | None
     }
 
 
+def build_verify_spec(repo: Path, scope: Path, python: Path,
+                      auth_contexts: Path | None = None) -> dict:
+    repo, scope, python = repo.resolve(), scope.resolve(), python.resolve()
+    command = [str(python), "-m", "integrations.artex_verify", "--candidate", "{candidate}",
+               "--scope", str(scope), "--output", "{output}"]
+    if auth_contexts is not None:
+        command += ["--auth-contexts", str(auth_contexts.resolve())]
+    code = (
+        "import json, pathlib, subprocess, sys, tempfile\n"
+        "candidate = json.load(sys.stdin)\n"
+        "output = pathlib.Path(tempfile.mkdtemp(prefix='artex-verify-'))\n"
+        "path = output / 'candidate.json'\n"
+        "path.write_text(json.dumps(candidate), encoding='utf-8')\n"
+        f"command = {command!r}\n"
+        "command = [str(path) if part == '{candidate}' else str(output) if part == '{output}' else part for part in command]\n"
+        f"try:\n    result = subprocess.run(command, cwd={str(repo)!r}, capture_output=True, text=True, timeout=60)\n"
+        "except subprocess.TimeoutExpired:\n"
+        "    print(json.dumps({'schema':'artex-verify/v1','status':'unavailable','reason':'verification timeout'}))\n"
+        "    raise SystemExit(0)\n"
+        "print(result.stdout if result.stdout.strip() else json.dumps({'schema':'artex-verify/v1','status':'unavailable','reason':result.stderr[-1000:]}))\n"
+        "raise SystemExit(0)\n"
+    )
+    return {
+        "key": "bugbounty_verify", "description": (
+            "Verify a worker-discovered HTTP response differential candidate. Requires target_url, "
+            "method, auth_context, prerequisites, success_criteria, observed_evidence, and "
+            "vulnerability_type. Supports GET body_contains with control_url; unsupported types "
+            "return unavailable. Scope, program policy and request budget are enforced."),
+        "schema": {"type": "object", "properties": {
+            "candidate_id": {"type": "string"}, "title": {"type": "string"},
+            "target_url": {"type": "string"}, "method": {"type": "string"},
+            "auth_context": {"type": "string"},
+            "prerequisites": {"type": "array", "items": {"type": "string"}},
+            "success_criteria": {"type": "object"}, "observed_evidence": {"type": "object"},
+            "vulnerability_type": {"type": "string"},
+        }, "required": ["target_url", "method", "auth_context", "prerequisites",
+                        "success_criteria", "observed_evidence", "vulnerability_type"]},
+        "agents": ["worker"], "enabled": True, "kind": "script",
+        "exec": {"code": code, "timeout_ms": 70000}, "deferred": False,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate ARTEX custom tool JSON")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[1])
@@ -65,8 +107,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--target-config", type=Path)
     parser.add_argument("--profile", choices=("quick", "llm", "agent", "rag", "web", "full"),
                         default="quick")
+    parser.add_argument("--include-verify", action="store_true")
+    parser.add_argument("--auth-contexts", type=Path)
     args = parser.parse_args(argv)
-    print(json.dumps(build_spec(args.repo, args.scope, args.python, args.target_config, args.profile),
+    scan_spec = build_spec(args.repo, args.scope, args.python, args.target_config, args.profile)
+    value = [scan_spec, build_verify_spec(args.repo, args.scope, args.python, args.auth_contexts)] if args.include_verify else scan_spec
+    print(json.dumps(value,
                      ensure_ascii=False, indent=2))
     return 0
 

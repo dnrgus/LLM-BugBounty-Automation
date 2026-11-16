@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -34,6 +35,23 @@ def _artex_assets(items: list[dict]) -> list[dict]:
     return assets
 
 
+def _finding_evidence(folder: Path) -> dict | None:
+    """Carry the actual sanitized evidence, with a digest of the complete file."""
+    path = folder / "evidence.json"
+    try:
+        raw = path.read_bytes()
+        parsed = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(parsed, dict) or not any(parsed.get(key) for key in
+                                                  ("response", "steps", "observations", "redacted_secret", "raw", "reproduction")):
+        return None
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
 def run(url: str, scope: Path | None, output: Path, profile: str, timeout: int,
         target_config: Path | None = None) -> dict:
     command = [sys.executable, str(ROOT / "main.py"), "scan", url, "--profile", profile,
@@ -63,12 +81,18 @@ def run(url: str, scope: Path | None, output: Path, profile: str, timeout: int,
     findings = []
     for item in summary.get("findings", []):
         status = item.get("status")
+        folder = (results_dir / item["path"]).resolve()
+        if not folder.is_relative_to(results_dir.resolve()):
+            return {"schema": "artex-bridge/v1", "ok": False,
+                    "error": "invalid_finding_path"}
+        evidence = _finding_evidence(folder)
         findings.append({
             "id": item.get("id"), "title": item.get("title"),
             "status": status, "severity": item.get("severity"),
             "endpoint": item.get("endpoint"), "source_tool": item.get("source_tool"),
-            "graph_kind": "finding" if status == "confirmed" else "candidate",
-            "report_path": str(results_dir / item["path"] / "report.md"),
+            "graph_kind": "finding" if status == "confirmed" and evidence else "candidate",
+            "report_path": str(folder / "report.md"),
+            "evidence": evidence,
         })
     discovery = scan.get("discovery") or {}
     coverage = [
