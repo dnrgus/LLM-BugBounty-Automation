@@ -7,15 +7,41 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(url: str, scope: Path | None, output: Path, profile: str, timeout: int) -> dict:
+def _artex_assets(items: list[dict]) -> list[dict]:
+    """Only observed HTTP endpoints have ARTEX's required URL and method."""
+    assets: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        if item.get("asset_type") != "endpoint":
+            continue
+        url = item.get("location")
+        method = (item.get("metadata") or {}).get("method")
+        if not isinstance(url, str) or not isinstance(method, str):
+            continue
+        if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"}:
+            continue
+        if urlsplit(url).scheme not in {"http", "https"} or not urlsplit(url).netloc:
+            continue
+        key = (method, url)
+        if key not in seen:
+            assets.append({"type": "endpoint", "url": url, "method": method})
+            seen.add(key)
+    return assets
+
+
+def run(url: str, scope: Path | None, output: Path, profile: str, timeout: int,
+        target_config: Path | None = None) -> dict:
     command = [sys.executable, str(ROOT / "main.py"), "scan", url, "--profile", profile,
                "--output", str(output), "--quiet"]
     if scope is not None:
         command.extend(["--scope", str(scope.resolve())])
+    if target_config is not None:
+        command.extend(["--pack-target", "openai", "--pack-target-config", str(target_config.resolve())])
     try:
         process = subprocess.run(command, cwd=ROOT, capture_output=True, text=True,
                                  timeout=timeout, check=False)
@@ -45,11 +71,23 @@ def run(url: str, scope: Path | None, output: Path, profile: str, timeout: int) 
             "report_path": str(results_dir / item["path"] / "report.md"),
         })
     discovery = scan.get("discovery") or {}
+    coverage = [
+        {"pack_id": selection.get("pack_id"), "selected": selection.get("selected"),
+         "reason": selection.get("reason")}
+        for selection in scan.get("pack_selection", [])
+    ]
+    executions = [
+        {"pack_id": execution.get("pack_id"), "tool_id": execution.get("tool_id"),
+         "status": execution.get("status"), "detail": execution.get("detail")}
+        for execution in scan.get("pack_runs", [])
+    ]
+    assets = (discovery.get("attack_surface") or {}).get("items", [])
     return {
         "schema": "artex-bridge/v1", "ok": True, "target": url,
         "run_id": summary.get("run_id"), "results_dir": str(results_dir),
-        "assets": (discovery.get("attack_surface") or {}).get("items", []),
+        "assets": assets, "artex_assets": _artex_assets(assets),
         "findings": findings,
+        "pack_selection": coverage, "pack_executions": executions,
         "discovery_errors": discovery.get("errors", []),
     }
 
@@ -60,9 +98,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--scope", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--profile", choices=("quick", "llm", "agent", "rag", "web", "full"), default="quick")
+    parser.add_argument("--target-config", type=Path,
+                        help="Target adapter YAML for running LLM/RAG/Agent testcase packs")
     parser.add_argument("--timeout", type=int, default=900)
     args = parser.parse_args(argv)
-    result = run(args.url, args.scope, args.output.resolve(), args.profile, args.timeout)
+    result = run(args.url, args.scope, args.output.resolve(), args.profile, args.timeout,
+                 args.target_config)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result["ok"] else 1
 
