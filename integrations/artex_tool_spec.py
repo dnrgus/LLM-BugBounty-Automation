@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shlex
 import sys
 from pathlib import Path
 
@@ -14,15 +13,29 @@ def build_spec(repo: Path, scope: Path, python: Path, target_config: Path | None
     repo = repo.resolve()
     scope = scope.resolve()
     python = python.resolve()
-    command = (
-        f"cd {shlex.quote(str(repo))} && "
-        f"{shlex.quote(str(python))} -m integrations.artex_bridge {{url}} "
-        f"--scope {shlex.quote(str(scope))} "
-        f"--profile {shlex.quote(profile)} "
-        "--output $(mktemp -d /tmp/artex-bugbounty-XXXXXXXX)"
-    )
+    command = [str(python), "-m", "integrations.artex_bridge", "{url}",
+               "--scope", str(scope), "--profile", profile, "--output", "{output}"]
     if target_config is not None:
-        command += f" --target-config {shlex.quote(str(target_config.resolve()))}"
+        command.extend(["--target-config", str(target_config.resolve())])
+    code = (
+        "import json, subprocess, sys, tempfile\n"
+        "params = json.load(sys.stdin)\n"
+        "url = params.get('url')\n"
+        "if not isinstance(url, str) or not url.startswith(('http://', 'https://')):\n"
+        "    print(json.dumps({'schema': 'artex-bridge/v1', 'ok': False, 'error': 'invalid_url'}))\n"
+        "    raise SystemExit(1)\n"
+        "output = tempfile.mkdtemp(prefix='artex-bugbounty-')\n"
+        f"command = {command!r}\n"
+        "command = [output if part == '{output}' else url if part == '{url}' else part for part in command]\n"
+        f"try:\n    result = subprocess.run(command, cwd={str(repo)!r}, capture_output=True, text=True, timeout=900)\n"
+        "except subprocess.TimeoutExpired:\n"
+        "    print(json.dumps({'schema': 'artex-bridge/v1', 'ok': False, 'error': 'scan_timeout'}))\n"
+        "    raise SystemExit(1)\n"
+        "print(result.stdout if result.stdout.strip() else json.dumps("
+        "{'schema': 'artex-bridge/v1', 'ok': False, 'error': 'scan_failed', "
+        "'detail': result.stderr[-1000:]}))\n"
+        "raise SystemExit(result.returncode)\n"
+    )
     return {
         "key": "bugbounty_scan",
         "description": (
@@ -38,8 +51,8 @@ def build_spec(repo: Path, scope: Path, python: Path, target_config: Path | None
         },
         "agents": ["worker"],
         "enabled": True,
-        "kind": "command",
-        "exec": {"command": command, "timeout_ms": 930000},
+        "kind": "script",
+        "exec": {"code": code, "timeout_ms": 930000},
         "deferred": False,
     }
 

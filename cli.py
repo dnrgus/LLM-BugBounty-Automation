@@ -639,6 +639,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     profile = load_profile(args.profile, args.pipeline_config)
     policy = _resolve_scan_policy(args)
+    if args.url:
+        decision = policy.validate_url(args.url)
+        if not decision.allowed:
+            raise ValueError(f"scan target is outside allowed scope: {decision.reason}")
     testcases = load_testcases(args.testcases)
     store = SQLiteStore(args.db)
 
